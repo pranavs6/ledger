@@ -16,18 +16,18 @@ import {
   setPassword,
   validatePassword,
 } from "./auth.ts";
-import { DB_PATH, HOST, isLoopback, PORT, ROOT } from "./config.ts";
+import { DATA_DIR, DB_PATH, HOST, isLoopback, PORT, ROOT } from "./config.ts";
 import { db } from "./db.ts";
-import { Detector } from "./location/detector.ts";
+import { helperToken, startStaleCheck, TOKEN_PATH } from "./location/geofence.ts";
+import { agentPlist } from "./launchd.ts";
 import { createApp } from "./server.tsx";
 
 const LABEL = "dev.ledger.server";
-const PLIST = path.join(os.homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
 const LOG = path.join(os.homedir(), "Library", "Logs", "ledger.log");
 
 const USAGE = `Usage: ledger <command>
 
-  serve                    Run the web app and the location detector
+  serve                    Run the web app
   adduser <name>           Create an account (asks for a password)
   passwd <name>            Set a new password and sign that account out everywhere
   deluser <name>           Delete an account and everything in it
@@ -36,6 +36,8 @@ const USAGE = `Usage: ledger <command>
   unlock                   Clear sign-in lockouts after too many failed attempts
   install-launchd          Start Ledger at login and keep it running
   uninstall-launchd        Stop doing that
+  install-helper           Build and start Ledger Locator, which logs visits to your places
+  uninstall-helper         Remove it
 
 Environment: LEDGER_PORT (4545), LEDGER_HOST (127.0.0.1), LEDGER_DB
 Database: ${DB_PATH}`;
@@ -101,43 +103,77 @@ async function newPassword(): Promise<string> {
 
 // ---------------------------------------------------------------- launchd
 
-const xml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const agentPath = (label: string) => path.join(os.homedir(), "Library", "LaunchAgents", `${label}.plist`);
+
+/** Writes a LaunchAgent and (re)starts it. */
+function loadAgent(label: string, plist: string): void {
+  const file = agentPath(label);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.mkdirSync(path.dirname(LOG), { recursive: true });
+  fs.writeFileSync(file, plist);
+  unloadAgent(label);
+  execFileSync("launchctl", ["bootstrap", `gui/${process.getuid!()}`, file], { stdio: "inherit" });
+}
+
+function unloadAgent(label: string): void {
+  try {
+    execFileSync("launchctl", ["bootout", `gui/${process.getuid!()}/${label}`], { stdio: "ignore" });
+  } catch {
+    // not loaded
+  }
+}
 
 function installLaunchd(): void {
   const env: Record<string, string> = { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" };
   for (const k of ["LEDGER_PORT", "LEDGER_HOST", "LEDGER_DB", "LEDGER_DATA"]) if (process.env[k]) env[k] = process.env[k]!;
-  const plist = fs
-    .readFileSync(path.join(ROOT, "launchd", `${LABEL}.plist.template`), "utf8")
-    .replaceAll("{{NODE}}", xml(process.execPath))
-    .replaceAll("{{ROOT}}", xml(ROOT))
-    .replaceAll("{{LOG}}", xml(LOG))
-    .replace(
-      "{{ENV}}",
-      Object.entries(env)
-        .map(([k, v]) => `    <key>${xml(k)}</key>\n    <string>${xml(v)}</string>`)
-        .join("\n"),
-    );
-  fs.mkdirSync(path.dirname(PLIST), { recursive: true });
-  fs.mkdirSync(path.dirname(LOG), { recursive: true });
-  fs.writeFileSync(PLIST, plist);
-  const domain = `gui/${process.getuid!()}`;
-  try {
-    execFileSync("launchctl", ["bootout", `${domain}/${LABEL}`], { stdio: "ignore" });
-  } catch {
-    // not loaded yet
-  }
-  execFileSync("launchctl", ["bootstrap", domain, PLIST], { stdio: "inherit" });
-  console.log(`Installed ${PLIST}\nLedger will run at http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT} from now on.\nLog: ${LOG}`);
+  const args = [process.execPath, "--import", path.join(ROOT, "node_modules/tsx/dist/loader.mjs"), path.join(ROOT, "src/cli.ts"), "serve"];
+  loadAgent(LABEL, agentPlist(LABEL, args, LOG, env, ROOT));
+  console.log(`Installed ${agentPath(LABEL)}\nLedger will run at http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT} from now on.\nLog: ${LOG}`);
 }
 
 function uninstallLaunchd(): void {
-  try {
-    execFileSync("launchctl", ["bootout", `gui/${process.getuid!()}/${LABEL}`], { stdio: "ignore" });
-  } catch {
-    // not loaded
-  }
-  fs.rmSync(PLIST, { force: true });
+  unloadAgent(LABEL);
+  fs.rmSync(agentPath(LABEL), { force: true });
   console.log("Ledger will no longer start at login.");
+}
+
+// ---------------------------------------------------------------- location helper
+
+const HELPER_LABEL = "dev.ledger.locator";
+const HELPER_APP = path.join(DATA_DIR, "Ledger Locator.app");
+const HELPER_LOG = path.join(os.homedir(), "Library", "Logs", "ledger-locator.log");
+
+function installHelper(): void {
+  const macos = path.join(HELPER_APP, "Contents", "MacOS");
+  const binary = path.join(macos, "LedgerLocator");
+  fs.rmSync(HELPER_APP, { recursive: true, force: true });
+  fs.mkdirSync(macos, { recursive: true });
+  console.log("Building Ledger Locator (takes a moment)...");
+  try {
+    execFileSync("xcrun", ["swiftc", "-O", "-o", binary, path.join(ROOT, "helper", "LedgerLocator.swift")], { stdio: "inherit" });
+  } catch {
+    die("could not build the helper. It needs the Xcode command line tools: xcode-select --install");
+  }
+  fs.copyFileSync(path.join(ROOT, "helper", "Info.plist"), path.join(HELPER_APP, "Contents", "Info.plist"));
+  // Ad hoc signature: enough for this Mac. macOS ties the location permission
+  // to it, so a rebuild may ask for permission again.
+  execFileSync("codesign", ["--force", "--sign", "-", "--identifier", HELPER_LABEL, HELPER_APP], { stdio: "inherit" });
+
+  helperToken(); // make sure the shared secret exists before the helper reads it
+  const url = `http://${isLoopback(HOST) || HOST === "0.0.0.0" ? "127.0.0.1" : HOST}:${PORT}`;
+  loadAgent(HELPER_LABEL, agentPlist(HELPER_LABEL, [binary, "--url", url, "--token-file", TOKEN_PATH], HELPER_LOG, {}));
+  console.log(`Installed ${HELPER_APP}
+It starts at login and reports to ${url}.
+macOS will ask whether Ledger Locator may use your location: choose Allow.
+If it does not ask, open System Settings, Privacy and Security, Location Services.
+Log: ${HELPER_LOG}`);
+}
+
+function uninstallHelper(): void {
+  unloadAgent(HELPER_LABEL);
+  fs.rmSync(agentPath(HELPER_LABEL), { force: true });
+  fs.rmSync(HELPER_APP, { recursive: true, force: true });
+  console.log("Ledger Locator removed. Visits will no longer be logged.");
 }
 
 // ---------------------------------------------------------------- serve
@@ -147,15 +183,15 @@ function runServer(): void {
     die(`refusing to listen on ${HOST} with no accounts. Run: ledger adduser <name>`);
   }
   db(); // migrate before taking requests
-  const detector = new Detector(db());
+  helperToken();
+  const stopStaleCheck = startStaleCheck(db());
   const server = serve({ fetch: createApp().fetch, hostname: HOST, port: PORT }, (info) => {
     const host = info.family === "IPv6" ? `[${info.address}]` : info.address;
     console.log(`Ledger on http://${host}:${info.port}`);
     if (!hasUsers()) console.log("No accounts yet. Create one with: bin/ledger adduser <name>");
   });
-  detector.start();
   const stop = () => {
-    detector.stop();
+    stopStaleCheck();
     server.close();
     db().close();
     process.exit(0);
@@ -239,6 +275,12 @@ async function main(argv: string[]): Promise<void> {
 
     case "uninstall-launchd":
       return uninstallLaunchd();
+
+    case "install-helper":
+      return installHelper();
+
+    case "uninstall-helper":
+      return uninstallHelper();
 
     case undefined:
     case "help":

@@ -28,7 +28,7 @@ const MENU: { heading: string; items: [string, string, string][] }[] = [
   {
     heading: "Places",
     items: [
-      ["/places", "My locations", "Places, their networks and logging"],
+      ["/places", "My locations", "Places, their geofences and logging"],
       ["/places/log", "Location log", "Every arrival and departure"],
     ],
   },

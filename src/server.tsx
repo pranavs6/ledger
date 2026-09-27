@@ -6,6 +6,7 @@ import { getCookie } from "hono/cookie";
 import { sessionUser } from "./auth.ts";
 import { HOST, ROOT, isLoopback } from "./config.ts";
 import { accountRoutes, authRoutes, SESSION_COOKIE } from "./routes/account.tsx";
+import { helperRoutes } from "./routes/helper.ts";
 import { journalRoutes } from "./routes/journal.tsx";
 import { linkRoutes } from "./routes/links.tsx";
 import { placeRoutes } from "./routes/places.tsx";
@@ -78,6 +79,7 @@ export function createApp(opts: { host?: string } = {}) {
   });
 
   app.route("/", authRoutes);
+  app.route("/api/helper", helperRoutes);
 
   app.use("*", async (c, next) => {
     const user = sessionUser(getCookie(c, SESSION_COOKIE));

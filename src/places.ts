@@ -1,20 +1,20 @@
 import { db, localDate, now } from "./db.ts";
-import { closeVisitsFor } from "./location/detector.ts";
-import type { Fingerprint } from "./location/fingerprint.ts";
+import { closeVisitsFor } from "./location/geofence.ts";
 
 export interface Place {
   id: number;
   name: string;
   logging_enabled: number;
   created_at: string;
-  networks: number;
+  lat: number | null;
+  lon: number | null;
+  radius_m: number;
   /** entered_at of the open visit, if there is one. */
   here_since: string | null;
 }
 
 const SELECT = `
-  SELECT p.id, p.name, p.logging_enabled, p.created_at,
-         (SELECT COUNT(*) FROM place_networks n WHERE n.place_id = p.id) AS networks,
+  SELECT p.id, p.name, p.logging_enabled, p.created_at, p.lat, p.lon, p.radius_m,
          (SELECT MIN(v.entered_at) FROM visits v WHERE v.place_id = p.id AND v.exited_at IS NULL) AS here_since
   FROM places p
   WHERE p.user_id = ? AND p.deleted_at IS NULL`;
@@ -35,15 +35,37 @@ export function placeNameTaken(userId: number, name: string, exceptId = 0): bool
   );
 }
 
-export function createPlace(userId: number, name: string): number {
+export interface PlaceInput {
+  name: string;
+  lat: number | null;
+  lon: number | null;
+  radius_m: number;
+}
+
+export function createPlace(userId: number, p: PlaceInput): number {
   return Number(
-    db().prepare("INSERT INTO places (user_id, name, logging_enabled, created_at) VALUES (?, ?, 1, ?)").run(userId, name, now())
-      .lastInsertRowid,
+    db()
+      .prepare("INSERT INTO places (user_id, name, lat, lon, radius_m, logging_enabled, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)")
+      .run(userId, p.name, p.lat, p.lon, p.radius_m, now()).lastInsertRowid,
   );
 }
 
-export function renamePlace(userId: number, id: number, name: string): void {
-  db().prepare("UPDATE places SET name = ? WHERE id = ? AND user_id = ?").run(name, id, userId);
+/** Moving or resizing the geofence ends the open visit; the helper re-checks the new one. */
+export function updatePlace(userId: number, id: number, p: PlaceInput): void {
+  const d = db();
+  d.transaction(() => {
+    const before = getPlace(userId, id);
+    if (!before) return;
+    d.prepare("UPDATE places SET name = ?, lat = ?, lon = ?, radius_m = ? WHERE id = ? AND user_id = ?").run(
+      p.name,
+      p.lat,
+      p.lon,
+      p.radius_m,
+      id,
+      userId,
+    );
+    if (before.lat !== p.lat || before.lon !== p.lon || before.radius_m !== p.radius_m) closeVisitsFor(d, id);
+  })();
 }
 
 export function setLogging(userId: number, id: number, on: boolean): void {
@@ -61,45 +83,6 @@ export function deletePlace(userId: number, id: number): void {
     d.prepare("UPDATE places SET deleted_at = ? WHERE id = ? AND user_id = ?").run(now(), id, userId);
     closeVisitsFor(d, id);
   })();
-}
-
-export interface Network {
-  id: number;
-  gateway_mac: string;
-  ssid: string | null;
-  label: string;
-  created_at: string;
-}
-
-export function placeNetworks(placeId: number): Network[] {
-  return db()
-    .prepare("SELECT id, gateway_mac, ssid, label, created_at FROM place_networks WHERE place_id = ? ORDER BY created_at")
-    .all(placeId) as Network[];
-}
-
-export function addNetwork(placeId: number, fp: Fingerprint, label: string): boolean {
-  if (!fp.gatewayMac) return false;
-  db()
-    .prepare(
-      `INSERT INTO place_networks (place_id, gateway_mac, ssid, label, created_at) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT (place_id, gateway_mac) DO UPDATE SET ssid = COALESCE(excluded.ssid, ssid), label = excluded.label`,
-    )
-    .run(placeId, fp.gatewayMac, fp.ssid ?? null, label, now());
-  return true;
-}
-
-export function removeNetwork(placeId: number, networkId: number): void {
-  db().prepare("DELETE FROM place_networks WHERE id = ? AND place_id = ?").run(networkId, placeId);
-}
-
-/** Live places of this user that already claim a gateway. */
-export function placesForGateway(userId: number, mac: string): { id: number; name: string }[] {
-  return db()
-    .prepare(
-      `SELECT DISTINCT p.id, p.name FROM places p JOIN place_networks n ON n.place_id = p.id
-       WHERE p.user_id = ? AND p.deleted_at IS NULL AND n.gateway_mac = ?`,
-    )
-    .all(userId, mac) as { id: number; name: string }[];
 }
 
 export interface Visit {

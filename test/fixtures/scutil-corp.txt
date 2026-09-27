@@ -1,9 +1,0 @@
-DNS configuration
-
-resolver #1
-  search domain[0] : corp.example.com
-  search domain[1] : example.com
-  nameserver[0] : 10.0.0.2
-  if_index : 14 (en0)
-  flags    : Request A records
-  reach    : 0x00000002 (Reachable)

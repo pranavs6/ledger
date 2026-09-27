@@ -20,6 +20,10 @@ describe("migrations", () => {
 
     migrate(d);
 
+    // Later migrations also ran: geofence columns exist, router tables are gone.
+    expect(d.prepare("SELECT radius_m FROM places").all()).toEqual([]);
+    expect(d.prepare("SELECT name FROM sqlite_master WHERE name = 'place_networks'").get()).toBeUndefined();
+
     expect(d.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
     expect(d.prepare("SELECT task_id, domain_id FROM task_domains").all()).toEqual([{ task_id: 3, domain_id: 7 }]);
     expect(d.prepare("SELECT link_id, domain_id FROM link_domains").all()).toEqual([{ link_id: 5, domain_id: 7 }]);

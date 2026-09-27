@@ -1,21 +1,27 @@
 import { Hono } from "hono";
+import type { FC } from "hono/jsx";
 import { audit } from "../auth.ts";
 import { dayBounds, db, localDate } from "../db.ts";
-import { step } from "../location/detector.ts";
-import { type Fingerprint, describe, readFingerprint } from "../location/fingerprint.ts";
 import {
-  addNetwork,
+  distanceM,
+  fmtCoords,
+  type HelperState,
+  helperAlive,
+  helperState,
+  MAX_RADIUS,
+  MIN_RADIUS,
+  parseCoords,
+} from "../location/geofence.ts";
+import {
   createPlace,
   deletePlace,
   getPlace,
   listPlaces,
   type Place,
+  type PlaceInput,
   placeNameTaken,
-  placeNetworks,
-  placesForGateway,
-  removeNetwork,
-  renamePlace,
   setLogging,
+  updatePlace,
   type Visit,
   visitMs,
   visits,
@@ -27,7 +33,6 @@ import {
   Button,
   ButtonGroup,
   ButtonLink,
-  Checkbox,
   ErrorSummary,
   type Errors,
   fmtDate,
@@ -41,16 +46,78 @@ import {
   SummaryCard,
   SummaryList,
   Tag,
+  WarningText,
 } from "../views/components.tsx";
 import { type Ctx, type Env, type Form, flash, form, intParam, page } from "../web.tsx";
 
 export const placeRoutes = new Hono<Env>();
 
-/** Swappable so tests do not shell out to route/arp. */
-export const network = { read: readFingerprint as () => Promise<Fingerprint> };
+const DEFAULT_RADIUS = 150;
 
 const LoggingTag = ({ p }: { p: Place }) =>
   p.logging_enabled ? <Tag colour="green">Logging on</Tag> : <Tag colour="grey">Logging off</Tag>;
+
+const fmtMetres = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`);
+
+const mapLink = (lat: number, lon: number) => `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=17/${lat}/${lon}`;
+
+const hasFix = (s: HelperState): s is HelperState & { lat: number; lon: number } => s.lat !== null && s.lon !== null;
+
+/** Inside the geofence by the helper's latest fix, whether or not logging is on. */
+const insideNow = (p: Place, s: HelperState) =>
+  helperAlive(s) && hasFix(s) && p.lat !== null && p.lon !== null && distanceM(p.lat, p.lon, s.lat, s.lon) <= p.radius_m;
+
+/** What the Ledger Locator helper is doing, and what to do about it. */
+const LocatorStatus: FC<{ s: HelperState; here: Place[] }> = ({ s, here }) => {
+  if (!s.last_seen_at) {
+    return (
+      <InsetText>
+        Ledger Locator is not running, so no visits are being logged. Install it on this Mac with{" "}
+        <code class="lg-code">bin/ledger install-helper</code> and allow it to use your location when macOS asks.
+      </InsetText>
+    );
+  }
+  if (s.auth_status === "denied" || s.auth_status === "restricted") {
+    return (
+      <WarningText>
+        Ledger Locator is not allowed to use your location. Allow it in System Settings, Privacy and Security, Location Services.
+      </WarningText>
+    );
+  }
+  if (s.auth_status === "disabled") {
+    return <WarningText>Location Services are turned off on this Mac, so no visits are being logged.</WarningText>;
+  }
+  if (s.auth_status === "notDetermined") {
+    return <InsetText>Ledger Locator is waiting for you to allow it to use your location.</InsetText>;
+  }
+  if (!helperAlive(s)) {
+    return (
+      <InsetText>
+        Ledger Locator last checked in {fmtDateTime(s.last_seen_at)}. This Mac may have been asleep, or the helper has stopped. Visits
+        resume when it checks in again.
+      </InsetText>
+    );
+  }
+  const notLogged = here.filter((p) => !p.logging_enabled);
+  return (
+    <InsetText>
+      {here.length ? (
+        <>
+          This Mac is at <strong>{here.map((p) => p.name).join(" and ")}</strong>.
+          {notLogged.length > 0 && <> Logging is off for {notLogged.map((p) => p.name).join(" and ")}, so this visit is not being recorded.</>}
+        </>
+      ) : (
+        "This Mac is not at any of your places."
+      )}
+      {s.located_at && s.accuracy_m !== null && (
+        <>
+          {" "}
+          Location accurate to about {fmtMetres(s.accuracy_m)}, updated {fmtTime(s.located_at)}.
+        </>
+      )}
+    </InsetText>
+  );
+};
 
 function VisitsTable({ rows, showPlace }: { rows: Visit[]; showPlace?: boolean }) {
   return (
@@ -101,11 +168,10 @@ function VisitsTable({ rows, showPlace }: { rows: Visit[]; showPlace?: boolean }
 
 // ---------------------------------------------------------------- list
 
-placeRoutes.get("/", async (c) => {
+placeRoutes.get("/", (c) => {
   const user = c.get("user");
-  const fp = await network.read();
   const places = listPlaces(user.id);
-  const matched = fp.gatewayMac ? placesForGateway(user.id, fp.gatewayMac) : [];
+  const s = helperState(db());
   const [from, to] = dayBounds(localDate());
   const todayMs = new Map<number, number>();
   for (const v of visits(user.id, { from, to })) todayMs.set(v.place_id, (todayMs.get(v.place_id) ?? 0) + visitMs(v, from, to));
@@ -126,27 +192,7 @@ placeRoutes.get("/", async (c) => {
 
       <div class="govuk-grid-row">
         <div class="govuk-grid-column-two-thirds">
-          <InsetText>
-            {!fp.gatewayMac ? (
-              <>This Mac is not on a network right now.</>
-            ) : matched.length ? (
-              <>
-                This Mac is at <strong>{matched.map((m) => m.name).join(", ")}</strong>, on {describe(fp)}.
-              </>
-            ) : (
-              <>
-                This Mac is on a network you have not added: {describe(fp)}.{" "}
-                <a class="govuk-link" href="/places/new">
-                  Add it as a new place
-                </a>{" "}
-                or open a place and choose ‘Add this network’.
-              </>
-            )}
-          </InsetText>
-          <p class="govuk-body-s lg-muted">
-            Places are recognised by the router this Mac is connected to. Arrivals and departures are logged within about a minute, while
-            this Mac is awake and Ledger is running.
-          </p>
+          <LocatorStatus s={s} here={places.filter((p) => p.here_since || insideNow(p, s))} />
         </div>
       </div>
 
@@ -159,7 +205,7 @@ placeRoutes.get("/", async (c) => {
               <th scope="col" class="govuk-table__header">Place</th>
               <th scope="col" class="govuk-table__header">Now</th>
               <th scope="col" class="govuk-table__header">Today</th>
-              <th scope="col" class="govuk-table__header">Networks</th>
+              <th scope="col" class="govuk-table__header">Geofence</th>
               <th scope="col" class="govuk-table__header">Logging</th>
             </tr>
           </thead>
@@ -171,9 +217,17 @@ placeRoutes.get("/", async (c) => {
                     {p.name}
                   </a>
                 </td>
-                <td class="govuk-table__cell">{p.here_since ? <Tag colour="green">Here since {fmtTime(p.here_since)}</Tag> : ""}</td>
+                <td class="govuk-table__cell">
+                  {p.here_since ? (
+                    <Tag colour="green">Here since {fmtTime(p.here_since)}</Tag>
+                  ) : insideNow(p, s) ? (
+                    <Tag colour="grey">Here, not logging</Tag>
+                  ) : (
+                    ""
+                  )}
+                </td>
                 <td class="govuk-table__cell">{todayMs.get(p.id) ? fmtDuration(todayMs.get(p.id)!) : ""}</td>
-                <td class="govuk-table__cell">{p.networks}</td>
+                <td class="govuk-table__cell">{p.lat !== null ? `${fmtMetres(p.radius_m)} radius` : <Tag colour="orange">Not set</Tag>}</td>
                 <td class="govuk-table__cell lg-actions">
                   <LoggingTag p={p} />
                   <ActionForm action={`/places/${p.id}/logging`} link hidden={{ on: p.logging_enabled ? "0" : "1", back: "/places" }}>
@@ -217,77 +271,122 @@ placeRoutes.get("/log", (c) => {
   );
 });
 
-// ---------------------------------------------------------------- add / rename
+// ---------------------------------------------------------------- add / change
 
-function validateName(userId: number, f: Form, exceptId = 0): Errors {
+function parsePlace(userId: number, f: Form, exceptId = 0): { input: PlaceInput; errors: Errors } {
   const errors: Errors = {};
   if (!f.name) errors.name = "Enter a name for the place";
   else if (f.name.length > 60) errors.name = "Name must be 60 characters or fewer";
   else if (placeNameTaken(userId, f.name, exceptId)) errors.name = `You already have a place called ${f.name}`;
-  return errors;
+
+  const coords = f.coords ? parseCoords(f.coords) : undefined;
+  if (!f.coords) errors.coords = "Enter the place’s coordinates, or use this Mac’s current location";
+  else if (!coords) errors.coords = "Enter coordinates as latitude, longitude, for example 12.9716, 77.5946";
+
+  const radius = Number(f.radius);
+  if (!f.radius) errors.radius = "Enter a radius in metres";
+  else if (!Number.isInteger(radius) || radius < MIN_RADIUS || radius > MAX_RADIUS) {
+    errors.radius = `Radius must be a whole number of metres between ${MIN_RADIUS} and ${MAX_RADIUS}`;
+  }
+  return {
+    errors,
+    input: { name: f.name ?? "", lat: coords?.lat ?? null, lon: coords?.lon ?? null, radius_m: radius },
+  };
 }
 
-async function newPlacePage(c: Ctx, values: Form = { add_network: "1" }, errors: Errors = {}) {
-  const fp = await network.read();
+function placeForm(c: Ctx, opts: { place?: Place; values: Form; errors?: Errors; located?: boolean }) {
+  const errors = opts.errors ?? {};
+  const v = opts.values;
+  const s = helperState(db());
+  const action = opts.place ? `/places/${opts.place.id}` : "/places";
+  const back = opts.place ? `/places/${opts.place.id}` : "/places";
   return page(
     c,
-    { title: "Add a place", nav: "places", error: Object.keys(errors).length > 0 },
+    { title: opts.place ? `Change ${opts.place.name}` : "Add a place", nav: "places", error: Object.keys(errors).length > 0 },
     <div class="govuk-grid-row">
       <div class="govuk-grid-column-two-thirds">
-        <BackLink href="/places" />
+        <BackLink href={back} />
         <ErrorSummary errors={errors} />
         <span class="govuk-caption-l">My locations</span>
-        <h1 class="govuk-heading-l">Add a place</h1>
-        <form method="post" action="/places" novalidate>
-          <Input name="name" label="Name" hint="For example, Office, Home or Client site" value={values.name} error={errors.name} width="20" />
-          {fp.gatewayMac ? (
-            <Checkbox
-              name="add_network"
-              label="This Mac is here now: add its current network"
-              hint={describe(fp)}
-              checked={values.add_network === "1"}
-            />
-          ) : (
-            <p class="govuk-body">This Mac is not on a network, so you will need to add one from the place’s page when you are there.</p>
+        <h1 class="govuk-heading-l">{opts.place ? `Change ${opts.place.name}` : "Add a place"}</h1>
+        {opts.located && s.located_at && (
+          <InsetText>
+            Filled in this Mac’s location from {fmtTime(s.located_at)}
+            {s.accuracy_m !== null && <>, accurate to about {fmtMetres(s.accuracy_m)}</>}.
+          </InsetText>
+        )}
+        <form method="post" action={action} novalidate>
+          {/* Enter submits the first button in a form; make that Save, not "Use this Mac's location". */}
+          <button type="submit" class="govuk-visually-hidden" tabindex={-1} aria-hidden="true">
+            Save
+          </button>
+          <Input name="name" label="Name" hint="For example, Office, Home or Client site" value={v.name} error={errors.name} width="20" />
+          <Input
+            name="coords"
+            label="Coordinates"
+            hint="Latitude, longitude. In Google Maps, right-click a spot and click the numbers to copy them."
+            value={v.coords}
+            error={errors.coords}
+            width="20"
+            spellcheck={false}
+          />
+          {hasFix(s) && (
+            <button type="submit" name="locate" value="1" class="govuk-button govuk-button--secondary lg-button--small lg-locate">
+              Use this Mac’s current location
+            </button>
           )}
-          <Button>Add place</Button>
+          <Input
+            name="radius"
+            label="Radius in metres"
+            hint="Mac location is usually accurate to 20 to 100 metres, so 150 or more works best."
+            value={v.radius}
+            error={errors.radius}
+            width="5"
+            type="number"
+          />
+          <ButtonGroup>
+            <Button>{opts.place ? "Save changes" : "Add place"}</Button>
+            <a class="govuk-link" href={back}>
+              Cancel
+            </a>
+          </ButtonGroup>
         </form>
       </div>
     </div>,
   );
 }
 
-placeRoutes.get("/new", (c) => newPlacePage(c));
+/** "Use this Mac's current location" re-shows the form with the helper's last fix. */
+function withCurrentLocation(f: Form): Form {
+  const s = helperState(db());
+  return hasFix(s) ? { ...f, coords: fmtCoords(s.lat, s.lon) } : f;
+}
+
+placeRoutes.get("/new", (c) => placeForm(c, { values: { radius: String(DEFAULT_RADIUS) } }));
 
 placeRoutes.post("/", async (c) => {
   const user = c.get("user");
   const f = await form(c);
-  const errors = validateName(user.id, f);
+  if (f.locate) return placeForm(c, { values: withCurrentLocation(f), located: true });
+  const { input, errors } = parsePlace(user.id, f);
   if (Object.keys(errors).length) {
     c.status(400);
-    return newPlacePage(c, f, errors);
+    return placeForm(c, { values: f, errors });
   }
-  const id = createPlace(user.id, f.name);
-  if (f.add_network === "1") {
-    const fp = await network.read();
-    if (addNetwork(id, fp, fp.ssid ?? fp.dnsDomain ?? `${f.name} network`)) step(db(), new Date(), fp);
-  }
-  audit(user.id, "place added", f.name, c.get("ip"));
-  flash(c, `${f.name} added`);
+  const id = createPlace(user.id, input);
+  audit(user.id, "place added", input.name, c.get("ip"));
+  flash(c, `${input.name} added`);
   return c.redirect(`/places/${id}`);
 });
 
-// ---------------------------------------------------------------- one place
-
-placeRoutes.get("/:id", async (c) => {
+placeRoutes.get("/:id", (c) => {
   const user = c.get("user");
   const p = getPlace(user.id, intParam(c));
   if (!p) return c.notFound();
-  const nets = placeNetworks(p.id);
-  const fp = await network.read();
-  const hasCurrent = !!fp.gatewayMac && nets.some((n) => n.gateway_mac === fp.gatewayMac);
+  const s = helperState(db());
   const weeks = weeklyTotals(user.id, p.id);
   const recent = visits(user.id, { placeId: p.id, limit: 20 });
+  const away = p.lat !== null && p.lon !== null && hasFix(s) ? distanceM(p.lat, p.lon, s.lat, s.lon) : undefined;
 
   return page(
     c,
@@ -301,59 +400,40 @@ placeRoutes.get("/:id", async (c) => {
         <SummaryList
           rows={[
             { key: "Name", value: p.name, action: { href: `/places/${p.id}/edit`, text: "Change" } },
+            {
+              key: "Geofence",
+              value:
+                p.lat !== null && p.lon !== null ? (
+                  <>
+                    {fmtMetres(p.radius_m)} around {fmtCoords(p.lat, p.lon)}
+                    <br />
+                    <a class="govuk-link" href={mapLink(p.lat, p.lon)} target="_blank" rel="noreferrer noopener">
+                      View on OpenStreetMap<span class="govuk-visually-hidden"> (opens in new tab)</span>
+                    </a>
+                  </>
+                ) : (
+                  <Tag colour="orange">Not set</Tag>
+                ),
+              action: { href: `/places/${p.id}/edit`, text: "Change" },
+            },
+            ...(away !== undefined
+              ? [
+                  {
+                    key: "This Mac",
+                    value: `${fmtMetres(away)} from the centre, ${away <= p.radius_m ? "inside" : "outside"} the geofence`,
+                  },
+                ]
+              : []),
             { key: "Logging", value: <LoggingTag p={p} /> },
-            { key: "Now", value: p.here_since ? `Here since ${fmtDateTime(p.here_since)}` : "Not here" },
+            {
+              key: "Now",
+              value: p.here_since ? `Here since ${fmtDateTime(p.here_since)}` : insideNow(p, s) ? "Here, but logging is off" : "Not here",
+            },
           ]}
         />
         <ActionForm action={`/places/${p.id}/logging`} variant="secondary" hidden={{ on: p.logging_enabled ? "0" : "1" }}>
           {p.logging_enabled ? "Turn off entry and exit logging" : "Turn on entry and exit logging"}
         </ActionForm>
-
-        <h2 class="govuk-heading-m">Networks</h2>
-        {nets.length === 0 ? (
-          <p class="govuk-body">No networks yet. Ledger cannot tell when you are here until you add one.</p>
-        ) : (
-          <table class="govuk-table">
-            <thead class="govuk-table__head">
-              <tr class="govuk-table__row">
-                <th scope="col" class="govuk-table__header">Network</th>
-                <th scope="col" class="govuk-table__header">Router</th>
-                <th scope="col" class="govuk-table__header">
-                  <span class="govuk-visually-hidden">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody class="govuk-table__body">
-              {nets.map((n) => (
-                <tr class="govuk-table__row">
-                  <td class="govuk-table__cell">
-                    {n.label || n.ssid || `${p.name} network`} {n.gateway_mac === fp.gatewayMac && <Tag colour="green">Connected</Tag>}
-                  </td>
-                  <td class="govuk-table__cell">
-                    <code class="lg-code">{n.gateway_mac}</code>
-                  </td>
-                  <td class="govuk-table__cell">
-                    <ActionForm action={`/places/${p.id}/networks/${n.id}/delete`} link>
-                      Remove<span class="govuk-visually-hidden"> {n.label || n.gateway_mac}</span>
-                    </ActionForm>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        {fp.gatewayMac && !hasCurrent && (
-          <form method="post" action={`/places/${p.id}/networks`}>
-            <Input
-              name="label"
-              label="Add this network"
-              hint={`This Mac is on ${describe(fp)}. Only add it if you are at ${p.name} now.`}
-              value={fp.ssid ?? fp.dnsDomain ?? `${p.name} network`}
-              width="20"
-            />
-            <Button variant="secondary">Add this network</Button>
-          </form>
-        )}
 
         <h2 class="govuk-heading-m">Recent visits</h2>
         {recent.length === 0 ? <p class="govuk-body">No visits logged yet.</p> : <VisitsTable rows={recent} />}
@@ -362,7 +442,6 @@ placeRoutes.get("/:id", async (c) => {
             See all visits to {p.name}
           </a>
         </p>
-
         <p class="govuk-body">
           <a class="govuk-link lg-link--warning" href={`/places/${p.id}/delete`}>
             Delete this place
@@ -382,6 +461,32 @@ placeRoutes.get("/:id", async (c) => {
   );
 });
 
+placeRoutes.get("/:id/edit", (c) => {
+  const p = getPlace(c.get("user").id, intParam(c));
+  if (!p) return c.notFound();
+  return placeForm(c, {
+    place: p,
+    values: { name: p.name, coords: p.lat !== null && p.lon !== null ? fmtCoords(p.lat, p.lon) : "", radius: String(p.radius_m) },
+  });
+});
+
+placeRoutes.post("/:id", async (c) => {
+  const user = c.get("user");
+  const p = getPlace(user.id, intParam(c));
+  if (!p) return c.notFound();
+  const f = await form(c);
+  if (f.locate) return placeForm(c, { place: p, values: withCurrentLocation(f), located: true });
+  const { input, errors } = parsePlace(user.id, f, p.id);
+  if (Object.keys(errors).length) {
+    c.status(400);
+    return placeForm(c, { place: p, values: f, errors });
+  }
+  updatePlace(user.id, p.id, input);
+  audit(user.id, "place changed", input.name, c.get("ip"));
+  flash(c, `${input.name} saved`);
+  return c.redirect(`/places/${p.id}`);
+});
+
 placeRoutes.post("/:id/logging", async (c) => {
   const user = c.get("user");
   const p = getPlace(user.id, intParam(c));
@@ -392,75 +497,6 @@ placeRoutes.post("/:id/logging", async (c) => {
   audit(user.id, on ? "logging on" : "logging off", p.name, c.get("ip"));
   flash(c, `Logging turned ${on ? "on" : "off"} for ${p.name}`);
   return c.redirect(f.back === "/places" ? "/places" : `/places/${p.id}`);
-});
-
-placeRoutes.post("/:id/networks", async (c) => {
-  const user = c.get("user");
-  const p = getPlace(user.id, intParam(c));
-  if (!p) return c.notFound();
-  const f = await form(c);
-  const fp = await network.read();
-  if (!addNetwork(p.id, fp, (f.label ?? "").slice(0, 60))) {
-    flash(c, "This Mac is not on a network, so nothing was added");
-    return c.redirect(`/places/${p.id}`);
-  }
-  step(db(), new Date(), fp);
-  audit(user.id, "network added", `${p.name}: ${fp.gatewayMac}`, c.get("ip"));
-  flash(c, `Network added to ${p.name}`);
-  return c.redirect(`/places/${p.id}`);
-});
-
-placeRoutes.post("/:id/networks/:nid/delete", (c) => {
-  const user = c.get("user");
-  const p = getPlace(user.id, intParam(c));
-  if (!p) return c.notFound();
-  removeNetwork(p.id, intParam(c, "nid"));
-  audit(user.id, "network removed", p.name, c.get("ip"));
-  flash(c, `Network removed from ${p.name}`);
-  return c.redirect(`/places/${p.id}`);
-});
-
-function renamePage(c: Ctx, p: Place, values: Form, errors: Errors = {}) {
-  return page(
-    c,
-    { title: `Change ${p.name}`, nav: "places", error: Object.keys(errors).length > 0 },
-    <div class="govuk-grid-row">
-      <div class="govuk-grid-column-two-thirds">
-        <BackLink href={`/places/${p.id}`} />
-        <ErrorSummary errors={errors} />
-        <form method="post" action={`/places/${p.id}`} novalidate>
-          <Input name="name" label="What is this place called?" heading value={values.name} error={errors.name} width="20" />
-          <ButtonGroup>
-            <Button>Save</Button>
-            <a class="govuk-link" href={`/places/${p.id}`}>
-              Cancel
-            </a>
-          </ButtonGroup>
-        </form>
-      </div>
-    </div>,
-  );
-}
-
-placeRoutes.get("/:id/edit", (c) => {
-  const p = getPlace(c.get("user").id, intParam(c));
-  return p ? renamePage(c, p, { name: p.name }) : c.notFound();
-});
-
-placeRoutes.post("/:id", async (c) => {
-  const user = c.get("user");
-  const p = getPlace(user.id, intParam(c));
-  if (!p) return c.notFound();
-  const f = await form(c);
-  const errors = validateName(user.id, f, p.id);
-  if (Object.keys(errors).length) {
-    c.status(400);
-    return renamePage(c, p, f, errors);
-  }
-  renamePlace(user.id, p.id, f.name);
-  audit(user.id, "place renamed", `${p.name} → ${f.name}`, c.get("ip"));
-  flash(c, "Place saved");
-  return c.redirect(`/places/${p.id}`);
 });
 
 placeRoutes.get("/:id/delete", (c) => {

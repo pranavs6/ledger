@@ -1,3 +1,0 @@
-  BSSID : <redacted>
-  InterfaceType : WiFi
-  SSID : <redacted>

@@ -278,3 +278,6 @@ body, button, input, select, textarea { font-family: "GDS Transport", arial, san
 
 .lg-column--new { border-style: dashed; background: transparent; }
 .lg-column--new .govuk-input { margin-bottom: 10px; }
+
+/* "Use this Mac's current location" sits under the coordinates it fills in. */
+.lg-locate { margin: -15px 0 30px; }

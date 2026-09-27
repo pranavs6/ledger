@@ -162,6 +162,26 @@ export const MIGRATIONS: string[] = [
   UPDATE tasks SET domain_id = NULL;
   UPDATE links SET domain_id = NULL;
   `,
+  // Places become geofences watched by the Ledger Locator helper; the
+  // router-based detector and its tables go.
+  `
+  UPDATE visits SET exited_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE exited_at IS NULL;
+  DROP TABLE place_networks;
+  DROP TABLE detector_state;
+  ALTER TABLE places ADD COLUMN lat REAL;
+  ALTER TABLE places ADD COLUMN lon REAL;
+  ALTER TABLE places ADD COLUMN radius_m INTEGER NOT NULL DEFAULT 150;
+  CREATE TABLE helper_state (
+    id           INTEGER PRIMARY KEY CHECK (id = 1),
+    last_seen_at TEXT,
+    auth_status  TEXT,
+    lat          REAL,
+    lon          REAL,
+    accuracy_m   REAL,
+    located_at   TEXT
+  );
+  INSERT INTO helper_state (id) VALUES (1);
+  `,
 ];
 
 export function migrate(db: DB): void {

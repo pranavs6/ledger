@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createSession } from "../src/auth.ts";
 import { db, localDate } from "../src/db.ts";
-import { network } from "../src/routes/places.tsx";
+import { applyReport, setHelperToken } from "../src/location/geofence.ts";
 import { createApp } from "../src/server.tsx";
 import { withUser } from "./helpers.ts";
 
@@ -10,7 +10,7 @@ const BASE = "http://localhost:4545";
 let cookie = "";
 let userId = 0;
 
-network.read = async () => ({ gatewayMac: "02:00:00:00:00:01", ssid: "Office-5G", iface: "en0" });
+setHelperToken("test-helper-token");
 
 function req(path: string, init: RequestInit & { form?: Record<string, string>; json?: unknown } = {}) {
   const headers = new Headers(init.headers);
@@ -207,18 +207,78 @@ describe("domains and popups", () => {
 });
 
 describe("places", () => {
-  it("adds a place with the current network and logs a visit", async () => {
-    const res = await req("/places", { form: { name: "Office", add_network: "1" } });
+  const addOffice = () => req("/places", { form: { name: "Office", coords: "12.9716, 77.5946", radius: "150" } });
+
+  it("adds a place with a geofence", async () => {
+    const res = await addOffice();
     expect(res.status).toBe(302);
-    const placeId = Number(res.headers.get("location")!.split("/").pop());
-    const nets = db().prepare("SELECT gateway_mac, ssid FROM place_networks WHERE place_id = ?").all(placeId);
-    expect(nets).toEqual([{ gateway_mac: "02:00:00:00:00:01", ssid: "Office-5G" }]);
+    const row = db().prepare("SELECT lat, lon, radius_m FROM places WHERE name = 'Office'").get();
+    expect(row).toEqual({ lat: 12.9716, lon: 77.5946, radius_m: 150 });
+  });
 
-    const list = await (await req("/places")).text();
-    expect(list).toContain("This Mac is at <strong>Office</strong>");
+  it("validates coordinates and radius", async () => {
+    const res = await req("/places", { form: { name: "X", coords: "somewhere", radius: "10" } });
+    expect(res.status).toBe(400);
+    const html = await res.text();
+    expect(html).toContain("Enter coordinates as latitude, longitude");
+    expect(html).toContain("Radius must be a whole number of metres between 50 and 5000");
+  });
 
+  it("fills in this Mac's location from the helper", async () => {
+    applyReport(db(), { auth: "authorized", location: { lat: 51.5033, lon: -0.1196, accuracy: 35, at: new Date().toISOString() } });
+    const res = await req("/places", { form: { name: "Eye", coords: "", radius: "150", locate: "1" } });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('value="51.50330, -0.11960"');
+    expect(db().prepare("SELECT COUNT(*) AS n FROM places").get()).toEqual({ n: 0 });
+  });
+
+  it("says when the helper is not running", async () => {
+    expect(await (await req("/places")).text()).toContain("Ledger Locator is not running");
+  });
+
+  it("still says where this Mac is when logging is off", async () => {
+    const placeId = Number((await addOffice()).headers.get("location")!.split("/").pop());
+    await req(`/places/${placeId}/logging`, { form: { on: "0" } });
+    applyReport(db(), { auth: "authorized", location: { lat: 12.9716, lon: 77.5946, accuracy: 30, at: new Date().toISOString() } });
+    const html = await (await req("/places")).text();
+    expect(html).toContain("This Mac is at <strong>Office</strong>");
+    expect(html).toContain("Logging is off for Office");
+    expect(html).toContain("Here, not logging");
+  });
+
+  it("turns logging off", async () => {
+    const placeId = Number((await addOffice()).headers.get("location")!.split("/").pop());
     await req(`/places/${placeId}/logging`, { form: { on: "0" } });
     const p = db().prepare("SELECT logging_enabled FROM places WHERE id = ?").get(placeId) as { logging_enabled: number };
     expect(p.logging_enabled).toBe(0);
+  });
+});
+
+describe("helper API", () => {
+  const api = (path: string, init: RequestInit = {}, token = "test-helper-token") =>
+    app.request(`${BASE}/api/helper${path}`, {
+      ...init,
+      headers: { host: "127.0.0.1:4545", authorization: `Bearer ${token}`, "content-type": "application/json", ...init.headers },
+    });
+
+  it("refuses a wrong token", async () => {
+    expect((await api("/places", {}, "nope")).status).toBe(401);
+  });
+
+  it("takes a report, logs a visit and returns the geofences to watch", async () => {
+    await req("/places", { form: { name: "Office", coords: "12.9716, 77.5946", radius: "200" } });
+    const placeId = (db().prepare("SELECT id FROM places WHERE name = 'Office'").get() as { id: number }).id;
+    const res = await api("/report", {
+      method: "POST",
+      body: JSON.stringify({
+        auth: "authorized",
+        location: { lat: 12.9717, lon: 77.5947, accuracy: 30, at: new Date().toISOString() },
+        states: [{ place_id: placeId, inside: true, at: new Date().toISOString() }],
+      }),
+    });
+    expect(await res.json()).toEqual({ places: [{ id: placeId, lat: 12.9716, lon: 77.5946, radius: 200 }] });
+    expect((await (await req("/places")).text())).toContain("This Mac is at <strong>Office</strong>");
+    expect(await (await req(`/places/${placeId}`)).text()).toMatch(/\d+ m from the centre, inside the geofence/);
   });
 });

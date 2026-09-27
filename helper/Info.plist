@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>dev.ledger.locator</string>
+  <key>CFBundleName</key>
+  <string>Ledger Locator</string>
+  <key>CFBundleDisplayName</key>
+  <string>Ledger Locator</string>
+  <key>CFBundleExecutable</key>
+  <string>LedgerLocator</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.1.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>13.0</string>
+  <!-- No Dock icon or menu bar; it runs in the background. -->
+  <key>LSUIElement</key>
+  <true/>
+  <key>NSLocationUsageDescription</key>
+  <string>Ledger logs when this Mac arrives at and leaves your places.</string>
+  <key>NSLocationWhenInUseUsageDescription</key>
+  <string>Ledger logs when this Mac arrives at and leaves your places.</string>
+  <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+  <string>Ledger logs when this Mac arrives at and leaves your places.</string>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <!-- Ledger is plain HTTP on 127.0.0.1. -->
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
+</dict>
+</plist>

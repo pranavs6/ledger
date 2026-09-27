@@ -15,6 +15,7 @@ npm install                      # also builds static/build/boot.js
 bin/ledger adduser pranav        # asks for a password
 bin/ledger serve                 # http://127.0.0.1:4545
 bin/ledger install-launchd       # or: run at login, restart if it dies
+bin/ledger install-helper        # Ledger Locator, for visits to your places
 ```
 
 Put it on your PATH with `ln -s "$PWD/bin/ledger" ~/.local/bin/ledger`.
@@ -22,7 +23,7 @@ Put it on your PATH with `ln -s "$PWD/bin/ledger" ~/.local/bin/ledger`.
 ## Commands
 
 ```
-ledger serve                 run the web app and the location detector
+ledger serve                 run the web app
 ledger adduser <name>        create an account (asks for a password)
 ledger passwd <name>         new password; signs that account out everywhere
 ledger deluser <name>        delete an account and everything in it
@@ -31,6 +32,8 @@ ledger revoke [name]         sign out every session, or one account's
 ledger unlock                clear sign-in lockouts (all local requests share one IP)
 ledger install-launchd       LaunchAgent dev.ledger.server, log in ~/Library/Logs/ledger.log
 ledger uninstall-launchd
+ledger install-helper        build Ledger Locator.app, start it at login (LaunchAgent dev.ledger.locator)
+ledger uninstall-helper
 ```
 
 Passwords can be piped for scripting: `printf 'pw\npw\n' | ledger adduser x`.
@@ -57,30 +60,42 @@ Environment: `LEDGER_PORT` (4545), `LEDGER_HOST` (127.0.0.1), `LEDGER_DB`
   its tasks are never overdue and the board only shows the last 14 days of
   them.
 - **Links**: URL, title, description and domain.
-- **My locations**: places, each with an on/off switch for entry and exit
-  logging, the networks that identify them, recent visits and hours per week.
-  **Location log** lists every visit.
+- **My locations**: places, each a geofence (a centre and a radius) with an
+  on/off switch for entry and exit logging, recent visits and hours per
+  week. **Location log** lists every visit.
 
-## Location detection
+## Location
 
-macOS 14.4+ redacts the Wi-Fi name (`SSID : <redacted>`) for command-line
-tools, so a network is identified by its **gateway's MAC address**:
-`route -n get default`, then `arp -n <gateway>`. This needs no permissions and
-doesn't change per router. If the default route is a VPN tunnel (`utun*`),
-each physical `en*` interface is tried instead, so a full-tunnel work VPN
-doesn't hide the office.
+Visits come from **Ledger Locator**, a small Swift app in `helper/` that
+`bin/ledger install-helper` builds into
+`~/Library/Application Support/ledger/Ledger Locator.app`, signs for this Mac
+and starts at login. It needs the Xcode command line tools. macOS asks once
+whether it may use your location; choose Allow.
 
-The detector polls every 30 seconds, and a few seconds after
-`/Library/Preferences/SystemConfiguration` changes:
+- It watches each place's geofence with Core Location region monitoring.
+  macOS tells it when you cross a boundary, so nothing polls. Each location
+  fix is also checked against the geofences, with a margin on the way out so
+  a noisy fix near the edge does not flap.
+- It reports to `POST /api/helper/report` on 127.0.0.1 every minute and on
+  every change: its permission status, its location, and whether it is
+  inside or outside each geofence. The reply is the list of geofences to
+  watch, so changes in Ledger reach it within a minute. It authenticates with
+  the secret in `~/Library/Application Support/ledger/helper-token` (mode
+  600).
+- A Mac's location comes from nearby Wi-Fi networks and is usually accurate
+  to 20 to 100 m, so give geofences a radius of 150 m or more.
+- macOS delivers nothing while the Mac sleeps. If the helper goes quiet for 5
+  minutes, open visits are closed at its last check-in. On waking it
+  re-checks every geofence, and a visit starts again if you are still there.
+- Turning logging off, moving a geofence or deleting a place closes its open
+  visit at once.
+- Add a place by pasting coordinates (right-click in Google Maps), or with
+  **Use this Mac's current location**.
 
-- a network only counts once it's seen on two ticks in a row, so a Wi-Fi blip
-  doesn't split a visit; the times recorded are when it was first seen
-- if more than 5 minutes pass between ticks (the Mac slept or Ledger was
-  stopped), open visits are closed at the last tick before the gap
-- turning logging off for a place, or deleting it, closes its open visit at
-  once. Deleting is soft, so the log keeps the place's name
-
-Add a network by being there: on a place's page, choose **Add this network**.
+A work Mac's management software may turn off Location Services or block
+unsigned apps. The places page says so when the helper cannot get a location.
+The helper's ad hoc signature is tied to this build, so reinstalling it may
+make macOS ask for permission again. Log: `~/Library/Logs/ledger-locator.log`.
 
 ## Security
 
@@ -112,10 +127,11 @@ src/db.ts               SQLite + migrations (PRAGMA user_version)
 src/tasks.ts, categories.ts, places.ts   data
 src/routes/*.tsx        pages (hono/jsx, server-rendered)
 src/views/              layout and GOV.UK components
-src/location/           fingerprint + detector
+src/location/geofence.ts  helper token, reports to visits, sleep handling
+helper/                 Ledger Locator (Swift) and its Info.plist
 client/boot.ts          govuk init, menu, board drag and drop
 static/ledger.css
-test/                   vitest: auth, fingerprint parsing, detector, routes
+test/                   vitest: auth, geofence visits, migrations, routes
 ```
 
 `npm test`, `npm run typecheck`.
