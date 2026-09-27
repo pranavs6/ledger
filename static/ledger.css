@@ -93,9 +93,7 @@ body, button, input, select, textarea { font-family: "GDS Transport", arial, san
 .govuk-task-list__item--with-link:hover, .govuk-pagination__item:hover,
 .govuk-pagination__next:hover, .govuk-pagination__prev:hover { background: var(--govuk-hover-colour); }
 .govuk-footer { background: var(--govuk-template-background-colour); }
-.lg-footer { padding: 20px 0 15px; }
-.lg-footer .govuk-footer__meta { align-items: center; }
-.lg-footer .govuk-footer__meta-item { margin-bottom: 5px; }
+
 
 /* ---------------------------------------------------------------- header (loci)
    GOV.UK's homepage header is not part of govuk-frontend: rebuilt here as a
@@ -316,3 +314,32 @@ body, button, input, select, textarea { font-family: "GDS Transport", arial, san
 .lg-search__result:hover { background: var(--govuk-hover-colour); }
 .lg-search__result:focus { background: #fd0; color: #0b0c0c; outline: 3px solid transparent; }
 .lg-search__status { margin: 5px 0 0; min-height: 1.25em; }
+
+/* ---------------------------------------------------------------- Today
+   A blue masthead like the GOV.UK homepage's, then headline numbers. Values
+   stay in text colour; an overdue count gets a labelled red tag, never red
+   digits alone. */
+
+.lg-masthead { background: #1d70b8; color: #fff; padding: 30px 0 20px; }
+.lg-masthead__date { margin: 0 0 5px; font-size: 1.1875rem; color: #d2e2f1; }
+.lg-masthead__title { margin: 0 0 15px; font-size: 3rem; line-height: 1.04; font-weight: 700; color: #fff; }
+.lg-masthead__lede { margin: 0 0 25px; font-size: 1.5rem; line-height: 1.25; max-width: 40em; }
+.lg-masthead .govuk-button { margin-bottom: 15px; }
+@media (max-width: 40.0525em) {
+  .lg-masthead__title { font-size: 2rem; }
+  .lg-masthead__lede { font-size: 1.1875rem; }
+}
+
+.lg-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px 30px; margin: 10px 0 40px; }
+.lg-stat {
+  display: flex; flex-direction: column; gap: 5px; padding-top: 15px;
+  border-top: 5px solid var(--govuk-brand-colour); color: var(--govuk-text-colour); text-decoration: none;
+}
+.lg-stat--alert { border-top-color: var(--govuk-error-colour); }
+.lg-stat__label { font-size: 1.1875rem; font-weight: 700; color: var(--govuk-link-colour); text-decoration: underline; text-underline-offset: 0.1578em; }
+.lg-stat:hover .lg-stat__label { color: var(--govuk-link-hover-colour); text-decoration-thickness: 3px; }
+.lg-stat__value { font-size: 3rem; font-weight: 700; line-height: 1.1; }
+.lg-stat__note { font-size: 1rem; color: var(--govuk-secondary-text-colour); }
+.lg-stat .govuk-tag { align-self: flex-start; }
+.lg-stat:focus { outline: 3px solid transparent; background: #fd0; box-shadow: 0 -2px #fd0, 0 4px #0b0c0c; }
+.lg-stat:focus .lg-stat__label, .lg-stat:focus .lg-stat__value, .lg-stat:focus .lg-stat__note { color: #0b0c0c; }

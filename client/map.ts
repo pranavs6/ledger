@@ -138,7 +138,7 @@ async function init(el: HTMLElement): Promise<void> {
   if (here) {
     const dot = document.createElement("div");
     dot.className = "lg-you";
-    dot.title = "This Mac";
+    dot.title = "You are here";
     new maplibregl.Marker({ element: dot }).setLngLat([here.lon, here.lat]).addTo(map);
   }
 

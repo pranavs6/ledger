@@ -60,7 +60,7 @@ const LoggingTag = ({ p }: { p: Place }) =>
 
 const fmtMetres = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`);
 
-/** Where the helper last put this Mac, for the map's "you are here" dot. */
+/** Where the helper last put you, for the map's "you are here" dot. */
 const hereData = (s: HelperState) =>
   helperAlive(s) && hasFix(s) ? { "data-here-lat": String(s.lat), "data-here-lon": String(s.lon) } : {};
 
@@ -77,7 +77,7 @@ const LocatorStatus: FC<{ s: HelperState; here: Place[] }> = ({ s, here }) => {
   if (!s.last_seen_at) {
     return (
       <InsetText>
-        Ledger Locator is not running, so no visits are being logged. Install it on this Mac with{" "}
+        Ledger Locator is not running, so no visits are being logged. Install it with{" "}
         <code class="lg-code">bin/ledger install-helper</code> and allow it to use your location when macOS asks.
       </InsetText>
     );
@@ -90,7 +90,7 @@ const LocatorStatus: FC<{ s: HelperState; here: Place[] }> = ({ s, here }) => {
     );
   }
   if (s.auth_status === "disabled") {
-    return <WarningText>Location Services are turned off on this Mac, so no visits are being logged.</WarningText>;
+    return <WarningText>Location Services are turned off, so no visits are being logged.</WarningText>;
   }
   if (s.auth_status === "notDetermined") {
     return <InsetText>Ledger Locator is waiting for you to allow it to use your location.</InsetText>;
@@ -98,7 +98,7 @@ const LocatorStatus: FC<{ s: HelperState; here: Place[] }> = ({ s, here }) => {
   if (!helperAlive(s)) {
     return (
       <InsetText>
-        Ledger Locator last checked in {fmtDateTime(s.last_seen_at)}. This Mac may have been asleep, or the helper has stopped. Visits
+        Ledger Locator last checked in {fmtDateTime(s.last_seen_at)}. The computer may have been asleep, or the helper has stopped. Visits
         resume when it checks in again.
       </InsetText>
     );
@@ -108,11 +108,11 @@ const LocatorStatus: FC<{ s: HelperState; here: Place[] }> = ({ s, here }) => {
     <InsetText>
       {here.length ? (
         <>
-          This Mac is at <strong>{here.map((p) => p.name).join(" and ")}</strong>.
+          You are at <strong>{here.map((p) => p.name).join(" and ")}</strong>.
           {notLogged.length > 0 && <> Logging is off for {notLogged.map((p) => p.name).join(" and ")}, so this visit is not being recorded.</>}
         </>
       ) : (
-        "This Mac is not at any of your places."
+        "You are not at any of your places."
       )}
       {s.located_at && s.accuracy_m !== null && (
         <>
@@ -285,7 +285,7 @@ function parsePlace(userId: number, f: Form, exceptId = 0): { input: PlaceInput;
   else if (placeNameTaken(userId, f.name, exceptId)) errors.name = `You already have a place called ${f.name}`;
 
   const coords = f.coords ? parseCoords(f.coords) : undefined;
-  if (!f.coords) errors.coords = "Enter the place’s coordinates, or use this Mac’s current location";
+  if (!f.coords) errors.coords = "Enter the place’s coordinates, or use your current location";
   else if (!coords) errors.coords = "Enter coordinates as latitude, longitude, for example 12.9716, 77.5946";
 
   const radius = Number(f.radius);
@@ -317,14 +317,14 @@ function placeForm(c: Ctx, opts: { place?: Place; values: Form; errors?: Errors;
           <h1 class="govuk-heading-l">{opts.place ? `Change ${opts.place.name}` : "Add a place"}</h1>
           {opts.located && s.located_at && (
             <InsetText>
-              Filled in this Mac’s location from {fmtTime(s.located_at)}
+              Filled in your location from {fmtTime(s.located_at)}
               {s.accuracy_m !== null && <>, accurate to about {fmtMetres(s.accuracy_m)}</>}.
             </InsetText>
           )}
         </div>
       </div>
       <form method="post" action={action} novalidate>
-        {/* Enter submits the first button in a form; make that Save, not "Use this Mac's location". */}
+        {/* Enter submits the first button in a form; make that Save, not "Use my current location". */}
         <button type="submit" class="govuk-visually-hidden" tabindex={-1} aria-hidden="true">
           Save
         </button>
@@ -368,13 +368,13 @@ function placeForm(c: Ctx, opts: { place?: Place; values: Form; errors?: Errors;
             />
             {hasFix(s) && (
               <button type="submit" name="locate" value="1" class="govuk-button govuk-button--secondary lg-button--small lg-locate">
-                Use this Mac’s current location
+                Use my current location
               </button>
             )}
             <Input
               name="radius"
               label="Radius in metres"
-              hint="Mac location is usually accurate to 20 to 100 metres, so 150 or more works best."
+              hint="Location is usually accurate to between 20 and 100 metres, so a smaller geofence may miss some visits."
               value={v.radius}
               error={errors.radius}
               width="5"
@@ -393,7 +393,7 @@ function placeForm(c: Ctx, opts: { place?: Place; values: Form; errors?: Errors;
   );
 }
 
-/** "Use this Mac's current location" re-shows the form with the helper's last fix. */
+/** "Use my current location" re-shows the form with the helper's last fix. */
 function withCurrentLocation(f: Form): Form {
   const s = helperState(db());
   return hasFix(s) ? { ...f, coords: fmtCoords(s.lat, s.lon) } : f;
@@ -465,7 +465,7 @@ placeRoutes.get("/:id", (c) => {
             ...(away !== undefined
               ? [
                   {
-                    key: "This Mac",
+                    key: "You",
                     value: `${fmtMetres(away)} from the centre, ${away <= p.radius_m ? "inside" : "outside"} the geofence`,
                   },
                 ]

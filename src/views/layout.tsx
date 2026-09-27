@@ -1,9 +1,12 @@
 // Page chrome, after loci's base.html: a blue header with the service name,
 // a Menu button that opens a grouped panel, then GOV.UK Service Navigation
 // for the everyday pages. No Crown, no GOV.UK wordmark.
-import type { FC, PropsWithChildren } from "hono/jsx";
+import fs from "node:fs";
+import path from "node:path";
+import type { Child, FC, PropsWithChildren } from "hono/jsx";
 import { raw } from "hono/html";
 import type { Theme } from "../auth.ts";
+import { ROOT } from "../config.ts";
 
 export type Nav = "today" | "journal" | "tasks" | "links" | "places" | "settings" | "account";
 
@@ -43,6 +46,16 @@ const MENU: { heading: string; items: [string, string, string][] }[] = [
 
 const VERSION = "0.1.0";
 
+// "Copyright (c) 2026 Name" from LICENSE, for the footer.
+const COPYRIGHT = (() => {
+  try {
+    const m = /Copyright \(c\) (\d{4}) (.+)/.exec(fs.readFileSync(path.join(ROOT, "LICENSE"), "utf8"));
+    return m ? `© ${m[1]} ${m[2].trim()}` : undefined;
+  } catch {
+    return undefined;
+  }
+})();
+
 // Runs before first paint: tells govuk-frontend JS is on, and resolves
 // "system" so the dark theme does not flash.
 const BOOT = `document.body.className += ' js-enabled' + ('noModule' in HTMLScriptElement.prototype ? ' govuk-frontend-supported' : '');`;
@@ -63,13 +76,15 @@ export const Layout: FC<
     title: string;
     nav?: Nav;
     wide?: boolean;
+    /** Full-width band above the page content, as on the GOV.UK homepage. */
+    hero?: Child;
     /** Load MapLibre and client/map.ts. */
     map?: boolean;
     username?: string;
     theme: Theme;
     flash?: string;
   }>
-> = ({ title, nav, wide, map, username, theme, flash, children }) => (
+> = ({ title, nav, wide, hero, map, username, theme, flash, children }) => (
   <html lang="en-GB" class="govuk-template" data-theme={theme}>
     <head>
       <meta charset="utf-8" />
@@ -164,23 +179,52 @@ export const Layout: FC<
         </section>
       )}
 
+      {hero}
       <div class={`lg-page ${wide ? "lg-wide-container" : "govuk-width-container"}`}>
-        <div class="govuk-phase-banner">
-          <p class="govuk-phase-banner__content">
-            <strong class="govuk-tag govuk-phase-banner__content__tag">Alpha</strong>
-            <span class="govuk-phase-banner__text">Your data stays on this Mac.</span>
-          </p>
-        </div>
         <main class="govuk-main-wrapper" id="main-content">
           {flash && <Flash text={flash} />}
           {children}
         </main>
       </div>
 
-      <footer class="govuk-footer lg-footer">
+      <footer class="govuk-footer">
         <div class="govuk-width-container">
+          {username && (
+            <>
+              <div class="govuk-footer__navigation">
+                {MENU.map((g) => (
+                  <div class="govuk-footer__section govuk-grid-column-one-third">
+                    <h2 class="govuk-footer__heading govuk-heading-m">{g.heading}</h2>
+                    <ul class="govuk-footer__list">
+                      {g.items.map(([href, text]) => (
+                        <li class="govuk-footer__list-item">
+                          <a class="govuk-footer__link" href={href}>
+                            {text}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+              <hr class="govuk-footer__section-break" />
+            </>
+          )}
           <div class="govuk-footer__meta">
-            <div class="govuk-footer__meta-item govuk-footer__meta-item--grow">Ledger v{VERSION}</div>
+            <div class="govuk-footer__meta-item govuk-footer__meta-item--grow">
+              <span class="govuk-footer__licence-description">
+                Ledger {VERSION} is released under the{" "}
+                <a class="govuk-footer__link" href="/licence">
+                  MIT Licence
+                </a>
+                . Built with{" "}
+                <a class="govuk-footer__link" href="https://frontend.design-system.service.gov.uk/" rel="noreferrer" target="_blank">
+                  GOV.UK Frontend
+                </a>
+                .
+              </span>
+            </div>
+            {COPYRIGHT && <div class="govuk-footer__meta-item">{COPYRIGHT}</div>}
           </div>
         </div>
       </footer>

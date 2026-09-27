@@ -18,7 +18,7 @@ import type { DB } from "../db.ts";
 
 export const SOURCE = "mac-location";
 export const STALE_MS = 5 * 60_000;
-export const MIN_RADIUS = 50;
+export const MIN_RADIUS = 20;
 export const MAX_RADIUS = 5000;
 
 // ---------------------------------------------------------------- token

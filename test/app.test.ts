@@ -222,7 +222,7 @@ describe("places", () => {
     expect(res.status).toBe(400);
     const html = await res.text();
     expect(html).toContain("Enter coordinates as latitude, longitude");
-    expect(html).toContain("Radius must be a whole number of metres between 50 and 5000");
+    expect(html).toContain("Radius must be a whole number of metres between 20 and 5000");
   });
 
   it("fills in this Mac's location from the helper", async () => {
@@ -238,12 +238,12 @@ describe("places", () => {
     expect(await (await req("/places")).text()).toContain("Ledger Locator is not running");
   });
 
-  it("still says where this Mac is when logging is off", async () => {
+  it("still says where you are when logging is off", async () => {
     const placeId = Number((await addOffice()).headers.get("location")!.split("/").pop());
     await req(`/places/${placeId}/logging`, { form: { on: "0" } });
     applyReport(db(), { auth: "authorized", location: { lat: 12.9716, lon: 77.5946, accuracy: 30, at: new Date().toISOString() } });
     const html = await (await req("/places")).text();
-    expect(html).toContain("This Mac is at <strong>Office</strong>");
+    expect(html).toContain("You are at <strong>Office</strong>");
     expect(html).toContain("Logging is off for Office");
     expect(html).toContain("Here, not logging");
   });
@@ -253,6 +253,21 @@ describe("places", () => {
     await req(`/places/${placeId}/logging`, { form: { on: "0" } });
     const p = db().prepare("SELECT logging_enabled FROM places WHERE id = ?").get(placeId) as { logging_enabled: number };
     expect(p.logging_enabled).toBe(0);
+  });
+});
+
+describe("chrome", () => {
+  it("shows the licence and copyright in the footer, and a licence page", async () => {
+    const html = await (await req("/")).text();
+    expect(html).toContain('href="/licence"');
+    expect(html).toMatch(/© \d{4} /);
+    expect(html).not.toContain("govuk-phase-banner");
+    expect(await (await req("/licence")).text()).toContain("MIT License");
+  });
+
+  it("allows a 20 m geofence", async () => {
+    const res = await req("/places", { form: { name: "Desk", coords: "12.9716, 77.5946", radius: "30" } });
+    expect(res.status).toBe(302);
   });
 });
 
@@ -317,7 +332,7 @@ describe("helper API", () => {
       }),
     });
     expect(await res.json()).toEqual({ places: [{ id: placeId, lat: 12.9716, lon: 77.5946, radius: 200 }] });
-    expect((await (await req("/places")).text())).toContain("This Mac is at <strong>Office</strong>");
+    expect((await (await req("/places")).text())).toContain("You are at <strong>Office</strong>");
     expect(await (await req(`/places/${placeId}`)).text()).toMatch(/\d+ m from the centre, inside the geofence/);
   });
 });

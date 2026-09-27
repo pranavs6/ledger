@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import {
@@ -17,6 +19,7 @@ import {
   validatePassword,
   verifyLogin,
 } from "../auth.ts";
+import { ROOT } from "../config.ts";
 import { db } from "../db.ts";
 import {
   Button,
@@ -56,7 +59,7 @@ function loginPage(c: Ctx, opts: { username?: string; errors?: Errors; next?: st
             <span class="govuk-details__summary-text">I do not have an account</span>
           </summary>
           <div class="govuk-details__text">
-            Accounts are created on this Mac with <code class="lg-code">bin/ledger adduser &lt;name&gt;</code>.
+            Accounts are created on the command line with <code class="lg-code">bin/ledger adduser &lt;name&gt;</code>.
           </div>
         </details>
       </div>
@@ -97,6 +100,23 @@ authRoutes.post("/login", async (c) => {
   }
   c.status(400);
   return loginPage(c, { username: f.username, errors, next });
+});
+
+authRoutes.get("/licence", (c) => {
+  const text = fs.readFileSync(path.join(ROOT, "LICENSE"), "utf8");
+  const [heading, ...rest] = text.trim().split(/\n\s*\n/);
+  return page(
+    c,
+    { title: "Licence" },
+    <div class="govuk-grid-row">
+      <div class="govuk-grid-column-two-thirds">
+        <h1 class="govuk-heading-l">{heading}</h1>
+        {rest.map((para) => (
+          <p class="govuk-body">{para.replace(/\s*\n\s*/g, " ")}</p>
+        ))}
+      </div>
+    </div>,
+  );
 });
 
 authRoutes.post("/logout", (c) => {
