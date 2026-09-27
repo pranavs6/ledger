@@ -1,0 +1,28 @@
+#!/bin/sh
+# Ledger CLI. Needs Node 22+ (better-sqlite3 is built against it): uses
+# $LEDGER_NODE, else `node` if new enough, else the newest nvm Node 22+.
+set -e
+SELF="$0"
+while [ -L "$SELF" ]; do
+  LINK="$(readlink "$SELF")"
+  case "$LINK" in /*) SELF="$LINK" ;; *) SELF="$(dirname "$SELF")/$LINK" ;; esac
+done
+DIR="$(cd "$(dirname "$SELF")/.." && pwd)"
+
+major() { "$1" -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0; }
+
+NODE="${LEDGER_NODE:-}"
+if [ -z "$NODE" ] && command -v node >/dev/null && [ "$(major node)" -ge 22 ]; then
+  NODE="$(command -v node)"
+fi
+if [ -z "$NODE" ]; then
+  for n in "$HOME"/.nvm/versions/node/v*/bin/node /opt/homebrew/bin/node /usr/local/bin/node; do
+    [ -x "$n" ] && [ "$(major "$n")" -ge 22 ] && NODE="$n"
+  done
+fi
+if [ -z "$NODE" ]; then
+  echo "ledger: needs Node 22 or later (set LEDGER_NODE to its path)" >&2
+  exit 1
+fi
+
+exec "$NODE" --import "$DIR/node_modules/tsx/dist/loader.mjs" "$DIR/src/cli.ts" "$@"

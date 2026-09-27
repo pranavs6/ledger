@@ -1,0 +1,2 @@
+  SSID : Office-5G
+  InterfaceType : WiFi

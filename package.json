@@ -1,0 +1,34 @@
+{
+  "name": "ledger",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "esbuild client/boot.ts --bundle --format=esm --target=es2020 --outfile=static/build/boot.js --minify --sourcemap",
+    "start": "tsx src/cli.ts serve",
+    "dev": "npm run build && tsx watch src/cli.ts serve",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "postinstall": "npm run build"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "better-sqlite3": "^13.0.3",
+    "esbuild": "^0.28.2",
+    "govuk-frontend": "^6.5.1",
+    "hono": "^4.13.9",
+    "marked": "^18.0.14",
+    "sanitize-html": "^2.17.7",
+    "tsx": "^4.23.15"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^22.20.4",
+    "@types/sanitize-html": "^2.16.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
+  }
+}
