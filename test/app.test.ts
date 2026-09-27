@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSession } from "../src/auth.ts";
 import { db, localDate } from "../src/db.ts";
 import { applyReport, setHelperToken } from "../src/location/geofence.ts";
+import { clearSearchCache } from "../src/location/search.ts";
 import { createApp } from "../src/server.tsx";
 import { withUser } from "./helpers.ts";
 
@@ -252,6 +253,44 @@ describe("places", () => {
     await req(`/places/${placeId}/logging`, { form: { on: "0" } });
     const p = db().prepare("SELECT logging_enabled FROM places WHERE id = ?").get(placeId) as { logging_enabled: number };
     expect(p.logging_enabled).toBe(0);
+  });
+});
+
+describe("map", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearSearchCache();
+  });
+
+  it("serves MapLibre's own files and nothing else from its folder", async () => {
+    const js = await req("/assets/maplibre/maplibre-gl.mjs");
+    expect(js.status).toBe(200);
+    expect(js.headers.get("content-type")).toContain("text/javascript");
+    expect((await req("/assets/maplibre/package.json")).status).toBe(404);
+  });
+
+  it("loads the map only on place pages", async () => {
+    expect(await (await req("/places/new")).text()).toContain("/static/build/map.js");
+    expect(await (await req("/tasks")).text()).not.toContain("/static/build/map.js");
+  });
+
+  it("proxies address search to Nominatim with a User-Agent, and caches it", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify([{ display_name: "MTI, Chennai, Tamil Nadu, India", lat: "12.9824", lon: "80.2015" }])),
+    );
+    const res = await req("/places/search?q=MTI%20Chennai");
+    expect(await res.json()).toEqual([{ name: "MTI, Chennai, Tamil Nadu, India", lat: 12.9824, lon: 80.2015 }]);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain("nominatim.openstreetmap.org/search?q=MTI+Chennai");
+    expect((init?.headers as Record<string, string>)["User-Agent"]).toMatch(/^Ledger\//);
+    await req("/places/search?q=mti%20chennai");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a search failure without crashing the page", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("busy", { status: 503 }));
+    const res = await req("/places/search?q=somewhere");
+    expect(res.status).toBe(502);
   });
 });
 

@@ -18,11 +18,16 @@ import { type Env, page } from "./web.tsx";
 const TYPES: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
   ".map": "application/json",
   ".svg": "image/svg+xml",
 };
 
 const GOVUK_CSS = path.join(ROOT, "node_modules/govuk-frontend/dist/govuk/govuk-frontend.min.css");
+// Served as is, not bundled: MapLibre starts its web worker from a URL
+// relative to its own module.
+const MAPLIBRE_DIST = path.join(ROOT, "node_modules/maplibre-gl/dist");
+const MAPLIBRE_FILES = new Set(["maplibre-gl.mjs", "maplibre-gl-shared.mjs", "maplibre-gl-worker.mjs", "maplibre-gl.css"]);
 
 function sendFile(file: string): Response {
   const body = fs.readFileSync(file);
@@ -68,6 +73,10 @@ export function createApp(opts: { host?: string } = {}) {
   });
 
   app.get("/assets/govuk-frontend.min.css", () => sendFile(GOVUK_CSS));
+  app.get("/assets/maplibre/:file", (c) => {
+    const file = c.req.param("file");
+    return MAPLIBRE_FILES.has(file) ? sendFile(path.join(MAPLIBRE_DIST, file)) : c.notFound();
+  });
   // GDS Transport is licensed for government use only; ledger.css maps the
   // family to local Arial, so the font files are never served.
   app.get("/assets/*", (c) => c.notFound());

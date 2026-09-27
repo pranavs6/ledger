@@ -63,11 +63,13 @@ export const Layout: FC<
     title: string;
     nav?: Nav;
     wide?: boolean;
+    /** Load MapLibre and client/map.ts. */
+    map?: boolean;
     username?: string;
     theme: Theme;
     flash?: string;
   }>
-> = ({ title, nav, wide, username, theme, flash, children }) => (
+> = ({ title, nav, wide, map, username, theme, flash, children }) => (
   <html lang="en-GB" class="govuk-template" data-theme={theme}>
     <head>
       <meta charset="utf-8" />
@@ -77,6 +79,7 @@ export const Layout: FC<
       <meta name="color-scheme" content={theme === "system" ? "light dark" : theme} />
       <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
       <link rel="stylesheet" href="/assets/govuk-frontend.min.css" />
+      {map && <link rel="stylesheet" href="/assets/maplibre/maplibre-gl.css" />}
       <link rel="stylesheet" href="/static/ledger.css" />
     </head>
     <body class="govuk-template__body">
@@ -165,7 +168,7 @@ export const Layout: FC<
         <div class="govuk-phase-banner">
           <p class="govuk-phase-banner__content">
             <strong class="govuk-tag govuk-phase-banner__content__tag">Alpha</strong>
-            <span class="govuk-phase-banner__text">Runs on this Mac only. Nothing leaves it.</span>
+            <span class="govuk-phase-banner__text">Your data stays on this Mac.</span>
           </p>
         </div>
         <main class="govuk-main-wrapper" id="main-content">
@@ -183,6 +186,7 @@ export const Layout: FC<
       </footer>
 
       <script type="module" src="/static/build/boot.js"></script>
+      {map && <script type="module" src="/static/build/map.js"></script>}
     </body>
   </html>
 );

@@ -21,7 +21,7 @@ export function flash(c: Ctx, text: string): void {
   setCookie(c, FLASH, encodeURIComponent(text), { path: "/", httpOnly: true, sameSite: "Lax", maxAge: 60 });
 }
 
-export function page(c: Ctx, opts: { title: string; nav?: Nav; wide?: boolean; error?: boolean }, body: Child) {
+export function page(c: Ctx, opts: { title: string; nav?: Nav; wide?: boolean; map?: boolean; error?: boolean }, body: Child) {
   const message = getCookie(c, FLASH);
   if (message) deleteCookie(c, FLASH, { path: "/" });
   if (isPartial(c)) {
@@ -40,6 +40,7 @@ export function page(c: Ctx, opts: { title: string; nav?: Nav; wide?: boolean; e
         title={opts.error ? `Error: ${opts.title}` : opts.title}
         nav={opts.nav}
         wide={opts.wide}
+        map={opts.map}
         username={user?.username}
         theme={user?.theme ?? "system"}
         flash={message ? decodeURIComponent(message) : undefined}

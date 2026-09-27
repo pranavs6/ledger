@@ -12,6 +12,7 @@ import {
   MIN_RADIUS,
   parseCoords,
 } from "../location/geofence.ts";
+import { searchPlaces } from "../location/search.ts";
 import {
   createPlace,
   deletePlace,
@@ -58,6 +59,10 @@ const LoggingTag = ({ p }: { p: Place }) =>
   p.logging_enabled ? <Tag colour="green">Logging on</Tag> : <Tag colour="grey">Logging off</Tag>;
 
 const fmtMetres = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`);
+
+/** Where the helper last put this Mac, for the map's "you are here" dot. */
+const hereData = (s: HelperState) =>
+  helperAlive(s) && hasFix(s) ? { "data-here-lat": String(s.lat), "data-here-lon": String(s.lon) } : {};
 
 const mapLink = (lat: number, lon: number) => `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=17/${lat}/${lon}`;
 
@@ -221,7 +226,7 @@ placeRoutes.get("/", (c) => {
                   {p.here_since ? (
                     <Tag colour="green">Here since {fmtTime(p.here_since)}</Tag>
                   ) : insideNow(p, s) ? (
-                    <Tag colour="grey">Here, not logging</Tag>
+                    <Tag colour="grey">{p.logging_enabled ? "Here, logging shortly" : "Here, not logging"}</Tag>
                   ) : (
                     ""
                   )}
@@ -302,57 +307,89 @@ function placeForm(c: Ctx, opts: { place?: Place; values: Form; errors?: Errors;
   const back = opts.place ? `/places/${opts.place.id}` : "/places";
   return page(
     c,
-    { title: opts.place ? `Change ${opts.place.name}` : "Add a place", nav: "places", error: Object.keys(errors).length > 0 },
-    <div class="govuk-grid-row">
-      <div class="govuk-grid-column-two-thirds">
-        <BackLink href={back} />
-        <ErrorSummary errors={errors} />
-        <span class="govuk-caption-l">My locations</span>
-        <h1 class="govuk-heading-l">{opts.place ? `Change ${opts.place.name}` : "Add a place"}</h1>
-        {opts.located && s.located_at && (
-          <InsetText>
-            Filled in this Mac’s location from {fmtTime(s.located_at)}
-            {s.accuracy_m !== null && <>, accurate to about {fmtMetres(s.accuracy_m)}</>}.
-          </InsetText>
-        )}
-        <form method="post" action={action} novalidate>
-          {/* Enter submits the first button in a form; make that Save, not "Use this Mac's location". */}
-          <button type="submit" class="govuk-visually-hidden" tabindex={-1} aria-hidden="true">
-            Save
-          </button>
-          <Input name="name" label="Name" hint="For example, Office, Home or Client site" value={v.name} error={errors.name} width="20" />
-          <Input
-            name="coords"
-            label="Coordinates"
-            hint="Latitude, longitude. In Google Maps, right-click a spot and click the numbers to copy them."
-            value={v.coords}
-            error={errors.coords}
-            width="20"
-            spellcheck={false}
-          />
-          {hasFix(s) && (
-            <button type="submit" name="locate" value="1" class="govuk-button govuk-button--secondary lg-button--small lg-locate">
-              Use this Mac’s current location
-            </button>
+    { title: opts.place ? `Change ${opts.place.name}` : "Add a place", nav: "places", map: true, error: Object.keys(errors).length > 0 },
+    <>
+      <div class="govuk-grid-row">
+        <div class="govuk-grid-column-two-thirds">
+          <BackLink href={back} />
+          <ErrorSummary errors={errors} />
+          <span class="govuk-caption-l">My locations</span>
+          <h1 class="govuk-heading-l">{opts.place ? `Change ${opts.place.name}` : "Add a place"}</h1>
+          {opts.located && s.located_at && (
+            <InsetText>
+              Filled in this Mac’s location from {fmtTime(s.located_at)}
+              {s.accuracy_m !== null && <>, accurate to about {fmtMetres(s.accuracy_m)}</>}.
+            </InsetText>
           )}
-          <Input
-            name="radius"
-            label="Radius in metres"
-            hint="Mac location is usually accurate to 20 to 100 metres, so 150 or more works best."
-            value={v.radius}
-            error={errors.radius}
-            width="5"
-            type="number"
-          />
-          <ButtonGroup>
-            <Button>{opts.place ? "Save changes" : "Add place"}</Button>
-            <a class="govuk-link" href={back}>
-              Cancel
-            </a>
-          </ButtonGroup>
-        </form>
+        </div>
       </div>
-    </div>,
+      <form method="post" action={action} novalidate>
+        {/* Enter submits the first button in a form; make that Save, not "Use this Mac's location". */}
+        <button type="submit" class="govuk-visually-hidden" tabindex={-1} aria-hidden="true">
+          Save
+        </button>
+        <div class="govuk-grid-row">
+          <div class="govuk-grid-column-two-thirds">
+            <Input name="name" label="Name" hint="For example, Office, Home or Client site" value={v.name} error={errors.name} width="20" />
+            <div class="govuk-form-group lg-search lg-js-only">
+              <label class="govuk-label govuk-label--s" for="place-search">
+                Search for an address or place
+              </label>
+              <div id="place-search-hint" class="govuk-hint">
+                Or click the map to drop the pin, and drag it to adjust.
+              </div>
+              <input
+                class="govuk-input"
+                id="place-search"
+                type="search"
+                autocomplete="off"
+                spellcheck={false}
+                aria-describedby="place-search-hint place-search-status"
+              />
+              <div id="place-results" class="lg-search__results" hidden></div>
+              <p id="place-search-status" class="govuk-body-s lg-muted lg-search__status" aria-live="polite"></p>
+            </div>
+          </div>
+        </div>
+        <div id="place-map" class="lg-map lg-js-only" data-editable="1" {...hereData(s)}></div>
+        <p class="govuk-body-s lg-muted lg-js-only">
+          Map tiles come from OpenFreeMap and VersaTiles, and searches go to OpenStreetMap’s Nominatim. Your places are not sent anywhere.
+        </p>
+        <div class="govuk-grid-row">
+          <div class="govuk-grid-column-two-thirds">
+            <Input
+              name="coords"
+              label="Coordinates"
+              hint="Set by the map, or paste latitude, longitude. In Google Maps, right-click a spot and click the numbers to copy them."
+              value={v.coords}
+              error={errors.coords}
+              width="20"
+              spellcheck={false}
+            />
+            {hasFix(s) && (
+              <button type="submit" name="locate" value="1" class="govuk-button govuk-button--secondary lg-button--small lg-locate">
+                Use this Mac’s current location
+              </button>
+            )}
+            <Input
+              name="radius"
+              label="Radius in metres"
+              hint="Mac location is usually accurate to 20 to 100 metres, so 150 or more works best."
+              value={v.radius}
+              error={errors.radius}
+              width="5"
+              type="number"
+            />
+            <ButtonGroup>
+              <Button>{opts.place ? "Save changes" : "Add place"}</Button>
+              <a class="govuk-link" href={back}>
+                Cancel
+              </a>
+            </ButtonGroup>
+          </div>
+        </div>
+      </form>
+    </>,
   );
 }
 
@@ -379,6 +416,15 @@ placeRoutes.post("/", async (c) => {
   return c.redirect(`/places/${id}`);
 });
 
+placeRoutes.get("/search", async (c) => {
+  try {
+    return c.json(await searchPlaces(c.req.query("q") ?? ""));
+  } catch (e) {
+    console.error(`place search: ${(e as Error).message}`);
+    return c.json({ error: "Search is unavailable" }, 502);
+  }
+});
+
 placeRoutes.get("/:id", (c) => {
   const user = c.get("user");
   const p = getPlace(user.id, intParam(c));
@@ -390,7 +436,7 @@ placeRoutes.get("/:id", (c) => {
 
   return page(
     c,
-    { title: p.name, nav: "places" },
+    { title: p.name, nav: "places", map: p.lat !== null },
     <div class="govuk-grid-row">
       <div class="govuk-grid-column-two-thirds">
         <BackLink href="/places" text="My locations" />
@@ -427,10 +473,26 @@ placeRoutes.get("/:id", (c) => {
             { key: "Logging", value: <LoggingTag p={p} /> },
             {
               key: "Now",
-              value: p.here_since ? `Here since ${fmtDateTime(p.here_since)}` : insideNow(p, s) ? "Here, but logging is off" : "Not here",
+              value: p.here_since
+                ? `Here since ${fmtDateTime(p.here_since)}`
+                : !insideNow(p, s)
+                  ? "Not here"
+                  : p.logging_enabled
+                    ? "Here. The visit is logged when Ledger Locator next checks in, within a minute."
+                    : "Here, but logging is off",
             },
           ]}
         />
+        {p.lat !== null && p.lon !== null && (
+          <div
+            id="place-map"
+            class="lg-map lg-map--small lg-js-only"
+            data-lat={String(p.lat)}
+            data-lon={String(p.lon)}
+            data-radius={String(p.radius_m)}
+            {...hereData(s)}
+          ></div>
+        )}
         <ActionForm action={`/places/${p.id}/logging`} variant="secondary" hidden={{ on: p.logging_enabled ? "0" : "1" }}>
           {p.logging_enabled ? "Turn off entry and exit logging" : "Turn on entry and exit logging"}
         </ActionForm>

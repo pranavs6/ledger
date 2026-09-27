@@ -89,8 +89,17 @@ whether it may use your location; choose Allow.
   re-checks every geofence, and a visit starts again if you are still there.
 - Turning logging off, moving a geofence or deleting a place closes its open
   visit at once.
-- Add a place by pasting coordinates (right-click in Google Maps), or with
-  **Use this Mac's current location**.
+- Add a place on the map, as in loci: search for an address, click to drop
+  the pin, drag it to adjust. The geofence is drawn as you change the
+  radius, and a blue dot shows where the helper last put this Mac. You can
+  also paste coordinates or use **Use this Mac's current location**.
+
+The map is MapLibre GL (served from `node_modules`, not bundled, since it
+starts its worker from its own URL) with OpenFreeMap tiles, or VersaTiles in
+dark mode. Search goes through `/places/search` to OpenStreetMap's Nominatim
+with an identifying User-Agent, at most one request a second, cached in
+memory. These are the only requests that leave the Mac, and neither carries
+your saved places.
 
 A work Mac's management software may turn off Location Services or block
 unsigned apps. The places page says so when the helper cannot get a location.
