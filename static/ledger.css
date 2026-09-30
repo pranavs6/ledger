@@ -343,3 +343,78 @@ body, button, input, select, textarea { font-family: "GDS Transport", arial, san
 .lg-stat .govuk-tag { align-self: flex-start; }
 .lg-stat:focus { outline: 3px solid transparent; background: #fd0; box-shadow: 0 -2px #fd0, 0 4px #0b0c0c; }
 .lg-stat:focus .lg-stat__label, .lg-stat:focus .lg-stat__value, .lg-stat:focus .lg-stat__note { color: #0b0c0c; }
+
+/* ---------------------------------------------------------------- goals
+   A checklist in GOV.UK's checkbox style. Each tick is a form button, so it
+   works without JS; the box is drawn on the button itself. */
+
+.lg-goals { list-style: none; margin: 0 0 20px; padding: 0; border-top: 1px solid var(--govuk-border-colour); }
+.lg-goal {
+  display: flex; align-items: flex-start; gap: 15px; padding: 10px 0;
+  border-bottom: 1px solid var(--govuk-border-colour);
+}
+.lg-goal__toggle { margin: 0; flex: none; }
+.lg-goal__check {
+  position: relative; width: 32px; height: 32px; margin: 0; padding: 0; cursor: pointer;
+  border: 2px solid var(--govuk-input-border-colour); background: var(--lg-field);
+}
+.lg-goal__check:focus { outline: 3px solid transparent; box-shadow: 0 0 0 3px #fd0; }
+.lg-goal__check:hover { box-shadow: 0 0 0 3px var(--govuk-hover-colour); }
+.lg-goal__check:focus:hover { box-shadow: 0 0 0 3px #fd0; }
+/* The tick, as on govuk-checkboxes. */
+.lg-goal--done .lg-goal__check::after {
+  content: ""; position: absolute; top: 7px; left: 6px; width: 14px; height: 6px;
+  border: solid var(--govuk-text-colour); border-width: 0 0 4px 4px; transform: rotate(-45deg);
+}
+.lg-goal__body { flex: 1; min-width: 0; padding-top: 4px; }
+.lg-goal__title { display: block; font-size: 1.1875rem; overflow-wrap: anywhere; }
+.lg-goal--done .lg-goal__title { text-decoration: line-through; color: var(--govuk-secondary-text-colour); }
+.lg-goal__meta { display: flex; flex-wrap: wrap; gap: 5px 10px; align-items: center; margin-top: 5px; font-size: 1rem; }
+.lg-goal__meta .govuk-tag { font-size: 0.875rem; }
+.lg-goal__change { flex: none; padding-top: 6px; font-size: 1rem; }
+
+.lg-goal-add .govuk-select { max-width: 16em; }
+.lg-day-goals { margin-bottom: 30px; }
+
+.lg-carry { border-left: 5px solid var(--govuk-border-colour); padding: 0 0 5px 15px; margin-bottom: 30px; }
+.lg-carry__list li { margin-bottom: 8px; }
+.lg-carry .govuk-button { margin-bottom: 10px; }
+
+/* ---------------------------------------------------------------- calendar */
+
+.lg-cal { width: 100%; table-layout: fixed; border-collapse: collapse; margin-bottom: 30px; }
+.lg-cal__weekday {
+  padding: 0 0 8px; text-align: left; font-size: 1rem; font-weight: 700;
+  color: var(--govuk-secondary-text-colour);
+}
+.lg-cal__day { height: 110px; padding: 0; vertical-align: top; border: 1px solid var(--govuk-border-colour); background: var(--lg-card); }
+.lg-cal__day--other { background: transparent; }
+.lg-cal__day--other .lg-cal__num { color: var(--govuk-secondary-text-colour); font-weight: 400; }
+.lg-cal__day--today { box-shadow: inset 0 0 0 3px var(--govuk-brand-colour); }
+.lg-cal__link {
+  display: flex; flex-direction: column; gap: 5px; height: 100%; min-height: 110px; box-sizing: border-box;
+  padding: 8px; color: var(--govuk-text-colour); text-decoration: none; font-size: 1rem;
+}
+.lg-cal__link:hover { background: var(--govuk-hover-colour); }
+.lg-cal__link:focus { outline: 3px solid transparent; background: #fd0; color: #0b0c0c; box-shadow: inset 0 -4px #0b0c0c; }
+.lg-cal__link:focus * { color: #0b0c0c !important; }
+.lg-cal__num { display: flex; align-items: center; justify-content: space-between; gap: 5px; font-weight: 700; font-size: 1.1875rem; }
+.lg-cal__today {
+  font-size: 0.875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em;
+  color: var(--govuk-brand-colour);
+}
+.lg-cal__goals { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-weight: 700; }
+.lg-cal__meter { display: block; width: 100%; height: 6px; background: var(--govuk-border-colour); }
+.lg-cal__meter > span { display: block; height: 100%; background: var(--govuk-brand-colour); }
+.lg-cal__goals--done .lg-cal__meter > span { background: var(--govuk-success-colour, #00703c); }
+.lg-cal__note { color: var(--govuk-secondary-text-colour); font-size: 0.875rem; }
+.lg-cal__due { color: var(--govuk-text-colour); }
+.lg-cal__day--past .lg-cal__due { color: var(--govuk-error-colour); font-weight: 700; }
+
+@media (max-width: 40.0525em) {
+  .lg-cal__day, .lg-cal__link { height: 70px; min-height: 70px; }
+  .lg-cal__link { padding: 4px; gap: 3px; }
+  .lg-cal__num { font-size: 1rem; }
+  .lg-cal__today, .lg-cal__label { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .lg-cal__goals, .lg-cal__note { font-size: 0.75rem; }
+}

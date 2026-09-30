@@ -43,10 +43,18 @@ Environment: `LEDGER_PORT` (4545), `LEDGER_HOST` (127.0.0.1), `LEDGER_DB`
 
 ## What's in it
 
-- **Today**: where you are, tasks due in the next 7 days, open tasks per
-  status, and today's journal.
+- **Today**: today's goals, where you are, tasks due in the next 7 days,
+  open tasks per status, and today's journal.
+- **Goals**: a checklist for each day. A goal can be tied to a task (leave
+  the text blank to use the task's title), and a task page has **Add to
+  today's goals**. Unfinished goals from the past 7 days are offered on Today
+  with **Move to today**. Nothing moves by itself, and a moved goal notes
+  the day it was first set for. Goals can be set for any day, including
+  future ones.
+- **Calendar**: a month grid, Monday first. Each day shows goals done out of
+  set, journal entries and open tasks due, and links to that day's page.
 - **Journal**: entries with a title, a Markdown body and a date. The day view
-  (`/journal/day/YYYY-MM-DD`) also lists that day's task status changes and
+  (`/journal/day/YYYY-MM-DD`) holds that day's goals and also lists that day's task status changes and
   place visits. Useful for standups.
 - **Tasks**: title, description (Markdown), domain, timeline (free text),
   created, assigned on, due by, status. There's a list view with filters and a
@@ -133,7 +141,7 @@ src/cli.ts              commands
 src/server.tsx          Hono app, security middleware, static files
 src/auth.ts             users, sessions, lockout, audit
 src/db.ts               SQLite + migrations (PRAGMA user_version)
-src/tasks.ts, categories.ts, places.ts   data
+src/tasks.ts, goals.ts, categories.ts, places.ts   data
 src/routes/*.tsx        pages (hono/jsx, server-rendered)
 src/views/              layout and GOV.UK components
 src/location/geofence.ts  helper token, reports to visits, sleep handling

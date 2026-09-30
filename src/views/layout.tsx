@@ -8,10 +8,11 @@ import { raw } from "hono/html";
 import type { Theme } from "../auth.ts";
 import { ROOT } from "../config.ts";
 
-export type Nav = "today" | "journal" | "tasks" | "links" | "places" | "settings" | "account";
+export type Nav = "today" | "calendar" | "journal" | "tasks" | "links" | "places" | "settings" | "account";
 
 const PRIMARY: [Nav, string, string][] = [
   ["today", "Today", "/"],
+  ["calendar", "Calendar", "/calendar"],
   ["journal", "Journal", "/journal"],
   ["tasks", "Tasks", "/tasks/board"],
   ["links", "Links", "/links"],
@@ -22,6 +23,7 @@ const MENU: { heading: string; items: [string, string, string][] }[] = [
   {
     heading: "Work",
     items: [
+      ["/calendar", "Calendar", "Goals, journal and due dates by month"],
       ["/journal/new", "Write in journal", "Add an entry for today or another day"],
       ["/tasks/board", "Task board", "Tasks as columns, plus statuses and domains"],
       ["/tasks", "All tasks", "Filter and sort as a list"],

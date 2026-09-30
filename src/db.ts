@@ -182,6 +182,21 @@ export const MIGRATIONS: string[] = [
   );
   INSERT INTO helper_state (id) VALUES (1);
   `,
+  // Daily goals: a checklist per day, each optionally tied to a task.
+  // carried_from keeps the day a goal was first set for when it moves on.
+  `
+  CREATE TABLE goals (
+    id           INTEGER PRIMARY KEY,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    goal_date    TEXT NOT NULL,
+    title        TEXT NOT NULL,
+    task_id      INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+    done_at      TEXT,
+    carried_from TEXT,
+    created_at   TEXT NOT NULL
+  );
+  CREATE INDEX idx_goals_user_date ON goals(user_id, goal_date);
+  `,
 ];
 
 export function migrate(db: DB): void {
@@ -224,14 +239,24 @@ export function localDate(d: Date = new Date()): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
+/** The local date `by` days after (or before) a YYYY-MM-DD date. */
+export function shiftDay(date: string, by: number): string {
+  const [y, m, d] = date.split("-").map(Number);
+  return localDate(new Date(y, m - 1, d + by));
+}
+
 /** UTC ISO bounds of a local calendar day, for querying ISO timestamps. */
 export function dayBounds(date: string): [string, string] {
   const [y, m, d] = date.split("-").map(Number);
   return [new Date(y, m - 1, d).toISOString(), new Date(y, m - 1, d + 1).toISOString()];
 }
 
-export const isDate = (s: unknown): s is string =>
-  typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s));
+/** A real YYYY-MM-DD date. Date.parse alone rolls 2026-02-30 over to 2 March. */
+export const isDate = (s: unknown): s is string => {
+  if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [y, m, d] = s.split("-").map(Number);
+  return localDate(new Date(y, m - 1, d)) === s;
+};
 
 /** A LIKE pattern for a substring search; use with `ESCAPE '\'`. */
 export const likeArg = (q: string) => `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;

@@ -2,10 +2,12 @@ import { Hono } from "hono";
 import type { FC } from "hono/jsx";
 import { listCategories } from "../categories.ts";
 import { db, localDate } from "../db.ts";
+import { goalsOn } from "../goals.ts";
 import { listPlaces, visitMs, visits } from "../places.ts";
 import { listTasks } from "../tasks.ts";
 import { ButtonLink, fmtDate, fmtDay, fmtTime, Tag } from "../views/components.tsx";
 import { type Env, page } from "../web.tsx";
+import { AddGoal, CarryOver, GoalList, goalsSection } from "./goals.tsx";
 
 export const todayRoutes = new Hono<Env>();
 
@@ -54,6 +56,9 @@ todayRoutes.get("/", (c) => {
   const entries = db()
     .prepare("SELECT id, title FROM journal_entries WHERE user_id = ? AND entry_date = ? AND deleted_at IS NULL ORDER BY created_at")
     .all(user.id, today) as { id: number; title: string }[];
+  const goals = goalsOn(user.id, today);
+  const goalsDone = goals.filter((g) => g.done_at).length;
+  const { tasks, unfinished } = goalsSection(user.id, today);
   const weekFrom = startOfWeek(now).toISOString();
   const weekTo = now.toISOString();
   const weekMs = visits(user.id, { from: weekFrom, to: weekTo }).reduce((sum, v) => sum + visitMs(v, weekFrom, weekTo), 0);
@@ -94,6 +99,12 @@ todayRoutes.get("/", (c) => {
     <>
       <h2 class="govuk-visually-hidden">At a glance</h2>
       <div class="lg-stats">
+        <Stat
+          label="Goals today"
+          value={goals.length ? `${goalsDone} of ${goals.length}` : 0}
+          href={`/journal/day/${today}`}
+          note={goals.length ? (goalsDone === goals.length ? "All done" : "Done so far") : "None set yet"}
+        />
         <Stat label="Due in the next 7 days" value={dueSoon.length} href="/tasks?due=week" note="Open tasks with a due date" />
         <Stat
           label="Overdue"
@@ -108,6 +119,11 @@ todayRoutes.get("/", (c) => {
 
       <div class="govuk-grid-row">
         <div class="govuk-grid-column-two-thirds">
+          <h2 class="govuk-heading-m">Today's goals</h2>
+          {goals.length === 0 ? <p class="govuk-body">No goals yet. What do you want to get done today?</p> : <GoalList goals={goals} back="/" />}
+          <AddGoal date={today} back="/" tasks={tasks} />
+          <CarryOver goals={unfinished} date={today} back="/" />
+
           <h2 class="govuk-heading-m">Coming up</h2>
           {dueSoon.length === 0 ? (
             <p class="govuk-body">Nothing due.</p>

@@ -1,8 +1,10 @@
 import { Hono } from "hono";
 import { audit } from "../auth.ts";
-import { dayBounds, db, isDate, likeArg, localDate, now } from "../db.ts";
+import { dayBounds, db, isDate, likeArg, localDate, now, shiftDay } from "../db.ts";
+import { goalsOn } from "../goals.ts";
 import { visitMs, visits } from "../places.ts";
 import { eventsBetween } from "../tasks.ts";
+import { AddGoal, CarryOver, GoalCount, GoalList, goalsSection } from "./goals.tsx";
 import {
   BackLink,
   Button,
@@ -44,11 +46,6 @@ const entriesOn = (userId: number, date: string) =>
       "SELECT id, title, body, entry_date, created_at, updated_at FROM journal_entries WHERE user_id = ? AND entry_date = ? AND deleted_at IS NULL ORDER BY created_at",
     )
     .all(userId, date) as Entry[];
-
-const shiftDay = (date: string, by: number) => {
-  const [y, m, d] = date.split("-").map(Number);
-  return localDate(new Date(y, m - 1, d + by));
-};
 
 const excerpt = (s: string, n = 180) => {
   const plain = s
@@ -154,18 +151,42 @@ journalRoutes.get("/day/:date", (c) => {
   const moves = eventsBetween(user.id, from, to);
   const stays = visits(user.id, { from, to }).reverse();
   const today = localDate();
+  const goals = goalsOn(user.id, date);
+  const { tasks, unfinished } = goalsSection(user.id, date);
+  const back = `/journal/day/${date}`;
+  const caption =
+    date === today ? "Today" : date === shiftDay(today, 1) ? "Tomorrow" : date === shiftDay(today, -1) ? "Yesterday" : "Day";
 
   return page(
     c,
-    { title: fmtDay(date), nav: "journal" },
+    { title: fmtDay(date), nav: "calendar" },
     <>
-      <BackLink href="/journal" text="Journal" />
-      <span class="govuk-caption-l">{date === today ? "Today" : "Journal"}</span>
+      <BackLink href={`/calendar?month=${date.slice(0, 7)}`} text="Calendar" />
+      <span class="govuk-caption-l">{caption}</span>
       <h1 class="govuk-heading-l">{fmtDay(date)}</h1>
 
       <div class="govuk-grid-row">
         <div class="govuk-grid-column-two-thirds">
-          <ButtonLink href={`/journal/new?date=${date}`}>Write in journal</ButtonLink>
+          <section class="lg-day-goals" aria-labelledby="goals-heading">
+            <h2 class="govuk-heading-m" id="goals-heading">
+              Goals
+            </h2>
+            {goals.length === 0 ? (
+              <p class="govuk-body">{date < today ? "No goals were set for this day." : "No goals yet. What do you want to get done?"}</p>
+            ) : (
+              <>
+                <GoalCount goals={goals} />
+                <GoalList goals={goals} back={back} />
+              </>
+            )}
+            <AddGoal date={date} back={back} tasks={tasks} />
+            {date === today && <CarryOver goals={unfinished} date={date} back={back} />}
+          </section>
+
+          <h2 class="govuk-heading-m">Journal</h2>
+          <ButtonLink href={`/journal/new?date=${date}`} variant="secondary">
+            Write in journal
+          </ButtonLink>
           {entries.length === 0 && <p class="govuk-body">No journal entries for this day.</p>}
           {entries.map((e) => (
             <SummaryCard
@@ -236,15 +257,13 @@ journalRoutes.get("/day/:date", (c) => {
             <span class="govuk-pagination__link-label">{fmtDay(shiftDay(date, -1))}</span>
           </a>
         </div>
-        {date < today && (
-          <div class="govuk-pagination__next">
-            <a class="govuk-link govuk-pagination__link" href={`/journal/day/${shiftDay(date, 1)}`} rel="next">
-              <span class="govuk-pagination__link-title">Next day</span>
-              <span class="govuk-visually-hidden">:</span>
-              <span class="govuk-pagination__link-label">{fmtDay(shiftDay(date, 1))}</span>
-            </a>
-          </div>
-        )}
+        <div class="govuk-pagination__next">
+          <a class="govuk-link govuk-pagination__link" href={`/journal/day/${shiftDay(date, 1)}`} rel="next">
+            <span class="govuk-pagination__link-title">Next day</span>
+            <span class="govuk-visually-hidden">:</span>
+            <span class="govuk-pagination__link-label">{fmtDay(shiftDay(date, 1))}</span>
+          </a>
+        </div>
       </nav>
     </>,
   );

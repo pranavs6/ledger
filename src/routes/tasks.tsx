@@ -3,6 +3,7 @@ import type { FC } from "hono/jsx";
 import { audit } from "../auth.ts";
 import { type Category, ensureDomains, listCategories, readDomainFields } from "../categories.ts";
 import { isDate, localDate } from "../db.ts";
+import { goalsOn } from "../goals.ts";
 import {
   createTask,
   deleteTask,
@@ -427,6 +428,18 @@ taskRoutes.get("/:id", (c) => {
           <Select name="status_id" label="Move to" value={String(t.status_id)} options={toOptions(statuses)} />
           <Button variant="secondary">Update status</Button>
         </form>
+        {goalsOn(user.id, localDate()).some((g) => g.task_id === t.id) ? (
+          <p class="govuk-body-s">
+            On <a class="govuk-link" href={`/journal/day/${localDate()}`}>today's goals</a>.
+          </p>
+        ) : (
+          <form method="post" action="/goals" class="lg-side-form">
+            <input type="hidden" name="goal_date" value={localDate()} />
+            <input type="hidden" name="task_id" value={String(t.id)} />
+            <input type="hidden" name="back" value={`/tasks/${t.id}`} />
+            <Button variant="secondary">Add to today's goals</Button>
+          </form>
+        )}
         <h2 class="govuk-heading-s">History</h2>
         <ol class="lg-timeline">
           {history.map((e) => (

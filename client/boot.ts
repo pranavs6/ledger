@@ -103,6 +103,38 @@ if (board) {
   });
 }
 
+// ---------------------------------------------------------------- goals
+//
+// Ticking a goal posts in the background instead of reloading the page.
+// Without JS each tick is an ordinary form post.
+
+document.addEventListener("submit", async (e) => {
+  const f = (e.target as HTMLElement).closest<HTMLFormElement>("form[data-goal-toggle]");
+  if (!f) return;
+  e.preventDefault();
+  const input = f.querySelector<HTMLInputElement>("input[name=done]")!;
+  const button = f.querySelector<HTMLButtonElement>("button")!;
+  const body = new URLSearchParams();
+  for (const [k, v] of new FormData(f)) if (typeof v === "string") body.append(k, v);
+  const done = input.value === "1";
+
+  f.closest(".lg-goal")?.classList.toggle("lg-goal--done", done);
+  input.value = done ? "0" : "1";
+  button.querySelector(".govuk-visually-hidden")!.textContent = `Mark ‘${button.dataset.title}’ as ${done ? "not done" : "done"}`;
+  const list = f.closest("[data-goals]");
+  const count = list?.parentElement?.querySelector("[data-goal-count]");
+  if (list && count) {
+    count.textContent = `${list.querySelectorAll(".lg-goal--done").length} of ${list.querySelectorAll(".lg-goal").length} done`;
+  }
+
+  try {
+    const res = await fetch(f.action, { method: "POST", headers: { Accept: "application/json" }, body });
+    if (!res.ok) throw new Error(String(res.status));
+  } catch {
+    location.reload();
+  }
+});
+
 // ---------------------------------------------------------------- popup
 //
 // Links marked data-modal (tasks, and the status and domain lists) open in a
@@ -112,7 +144,7 @@ if (board) {
 // the page behind reloads when the dialog closes. Without JS, the same links
 // and forms work as ordinary pages.
 
-const IN_MODAL = [/^\/tasks\/(new|\d+(\/(edit|delete))?)$/, /^\/settings\/(statuses|domains)(\/\d+)?$/];
+const IN_MODAL = [/^\/tasks\/(new|\d+(\/(edit|delete))?)$/, /^\/goals\/\d+\/edit$/, /^\/settings\/(statuses|domains)(\/\d+)?$/];
 const inModal = (url: URL) => url.origin === location.origin && IN_MODAL.some((re) => re.test(url.pathname));
 
 const dialog = document.createElement("dialog");

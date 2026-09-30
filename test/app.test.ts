@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createSession } from "../src/auth.ts";
-import { db, localDate } from "../src/db.ts";
+import { createSession, createUser } from "../src/auth.ts";
+import { db, localDate, shiftDay } from "../src/db.ts";
 import { applyReport, setHelperToken } from "../src/location/geofence.ts";
 import { clearSearchCache } from "../src/location/search.ts";
 import { createApp } from "../src/server.tsx";
@@ -81,7 +81,7 @@ describe("security", () => {
 
 describe("pages", () => {
   it("renders every top-level page", async () => {
-    for (const path of ["/", "/journal", "/tasks", "/tasks/board", "/tasks/new", "/links", "/places", "/places/log", "/settings/statuses", "/settings/domains", "/profile", "/activity"]) {
+    for (const path of ["/", "/calendar", "/journal", "/tasks", "/tasks/board", "/tasks/new", "/links", "/places", "/places/log", "/settings/statuses", "/settings/domains", "/profile", "/activity"]) {
       const res = await req(path);
       expect(res.status, path).toBe(200);
       expect(await res.text(), path).toContain('class="govuk-template"');
@@ -334,5 +334,125 @@ describe("helper API", () => {
     expect(await res.json()).toEqual({ places: [{ id: placeId, lat: 12.9716, lon: 77.5946, radius: 200 }] });
     expect((await (await req("/places")).text())).toContain("You are at <strong>Office</strong>");
     expect(await (await req(`/places/${placeId}`)).text()).toMatch(/\d+ m from the centre, inside the geofence/);
+  });
+});
+
+describe("goals and calendar", () => {
+  const today = localDate();
+  const goalIds = () => (db().prepare("SELECT id FROM goals ORDER BY id").all() as { id: number }[]).map((r) => r.id);
+
+  it("adds a goal, ticks it off and shows it on the day and on Today", async () => {
+    const added = await req("/goals", { form: { goal_date: today, title: "Ship the fare fix", back: "/" } });
+    expect(added.status).toBe(302);
+    expect(added.headers.get("location")).toBe("/");
+    const [id] = goalIds();
+
+    expect(await (await req("/")).text()).toContain("Ship the fare fix");
+    const day = await (await req(`/journal/day/${today}`)).text();
+    expect(day).toContain("Ship the fare fix");
+    expect(day).toContain("0 of 1 done");
+
+    const ticked = await req(`/goals/${id}/done`, { form: { done: "1" }, headers: { accept: "application/json" } });
+    expect(await ticked.json()).toEqual({ ok: true, done: true });
+    expect(await (await req(`/journal/day/${today}`)).text()).toContain("1 of 1 done");
+
+    // Without JS: a plain form post that goes back where it came from.
+    const unticked = await req(`/goals/${id}/done`, { form: { done: "0", back: `/journal/day/${today}` } });
+    expect(unticked.headers.get("location")).toBe(`/journal/day/${today}`);
+    expect(await (await req(`/journal/day/${today}`)).text()).toContain("0 of 1 done");
+  });
+
+  it("uses a task's title when the goal is left blank, and only the user's own tasks", async () => {
+    const created = await req("/tasks", { form: { title: "Payout reconciliation", status_id: String(statusId("In progress")) } });
+    const taskId = Number(created.headers.get("location")!.split("/").pop());
+
+    expect((await (await req(`/tasks/${taskId}`)).text())).toContain("Add to today&#39;s goals");
+    await req("/goals", { form: { goal_date: today, task_id: String(taskId) } });
+    const day = await (await req(`/journal/day/${today}`)).text();
+    expect(day).toContain(`href="/tasks/${taskId}"`);
+    expect(day).toContain("Payout reconciliation");
+    expect(await (await req(`/tasks/${taskId}`)).text()).toContain("today&#39;s goals</a>");
+
+    const bad = await req("/goals", { form: { goal_date: today, task_id: "99999" } });
+    expect(bad.status).toBe(400);
+    expect(await bad.text()).toContain("Select a task from the list");
+  });
+
+  it("validates goals", async () => {
+    const res = await req("/goals", { form: { goal_date: "2026-02-30", title: "" } });
+    expect(res.status).toBe(400);
+    const html = await res.text();
+    expect(html).toContain("Enter a goal, or select a task");
+    expect(html).toContain("Date must be a real date");
+  });
+
+  it("offers yesterday's unfinished goals and carries them over", async () => {
+    const yesterday = shiftDay(today, -1);
+    await req("/goals", { form: { goal_date: yesterday, title: "Review PR 812" } });
+    await req("/goals", { form: { goal_date: yesterday, title: "Already done" } });
+    const [open, done] = goalIds();
+    await req(`/goals/${done}/done`, { form: { done: "1" } });
+
+    const home = await (await req("/")).text();
+    expect(home).toContain("Not finished on earlier days");
+    expect(home).toContain("Review PR 812");
+    expect(home).not.toMatch(/Already done.*Move to today/s);
+
+    const moved = await req("/goals/carry", { form: { to: today, ids: `${open},${done}`, back: "/" } });
+    expect(moved.headers.get("location")).toBe("/");
+    // The finished one stays where it was.
+    expect(db().prepare("SELECT id, goal_date, carried_from FROM goals ORDER BY id").all()).toEqual([
+      { id: open, goal_date: today, carried_from: yesterday },
+      { id: done, goal_date: yesterday, carried_from: null },
+    ]);
+    expect(await (await req(`/journal/day/${today}`)).text()).toContain("Carried over from");
+  });
+
+  it("changes, moves and deletes a goal", async () => {
+    await req("/goals", { form: { goal_date: today, title: "Draft" } });
+    const [id] = goalIds();
+    const tomorrow = shiftDay(today, 1);
+    const saved = await req(`/goals/${id}`, { form: { title: "Final", goal_date: tomorrow, back: "/" } });
+    expect(saved.headers.get("location")).toBe("/");
+    expect(await (await req(`/journal/day/${tomorrow}`)).text()).toContain("Final");
+    await req(`/goals/${id}/delete`, { method: "POST", form: {} });
+    expect(goalIds()).toEqual([]);
+  });
+
+  it("does not let another account touch a goal", async () => {
+    await req("/goals", { form: { goal_date: today, title: "Mine" } });
+    const [id] = goalIds();
+    const other = await createUser("someone", "another password");
+    cookie = `ledger_session=${createSession(other).token}`;
+    expect((await req(`/goals/${id}/edit`)).status).toBe(404);
+    expect((await req(`/goals/${id}/done`, { form: { done: "1" } })).status).toBe(404);
+    expect((await req(`/goals/${id}/delete`, { method: "POST", form: {} })).status).toBe(404);
+    expect(await (await req(`/journal/day/${today}`)).text()).not.toContain("Mine");
+  });
+
+  it("shows goals, journal entries and due tasks on the month grid", async () => {
+    const date = "2026-03-10";
+    await req("/goals", { form: { goal_date: date, title: "a" } });
+    await req("/goals", { form: { goal_date: date, title: "b" } });
+    await req(`/goals/${goalIds()[0]}/done`, { form: { done: "1" } });
+    await req("/journal", { form: { title: "Standup", entry_date: date } });
+    await req("/tasks", { form: { title: "Due one", status_id: String(statusId("In progress")), due_by: date } });
+
+    const html = await (await req("/calendar?month=2026-03")).text();
+    expect(html).toContain("<h1 class=\"govuk-heading-l\">March 2026</h1>");
+    // March 2026 starts on a Sunday, so the grid opens on Monday 23 February.
+    expect(html).toContain('href="/journal/day/2026-02-23"');
+    expect(html).toContain('href="/journal/day/2026-04-05"');
+    expect(html).not.toContain('href="/journal/day/2026-04-06"');
+    expect(html).toMatch(/2026-03-10.*?1\/2.*?1 journal entry.*?1 due/s);
+    expect(html).toContain("February 2026");
+    expect(html).toContain("April 2026");
+
+    expect((await req("/calendar?month=nonsense")).status).toBe(200);
+  });
+
+  it("links the day page forward into the future", async () => {
+    const html = await (await req(`/journal/day/${today}`)).text();
+    expect(html).toContain(`href="/journal/day/${shiftDay(today, 1)}"`);
   });
 });

@@ -6,6 +6,8 @@ import { getCookie } from "hono/cookie";
 import { sessionUser } from "./auth.ts";
 import { HOST, ROOT, isLoopback } from "./config.ts";
 import { accountRoutes, authRoutes, SESSION_COOKIE } from "./routes/account.tsx";
+import { calendarRoutes } from "./routes/calendar.tsx";
+import { goalRoutes } from "./routes/goals.tsx";
 import { helperRoutes } from "./routes/helper.ts";
 import { journalRoutes } from "./routes/journal.tsx";
 import { linkRoutes } from "./routes/links.tsx";
@@ -103,6 +105,8 @@ export function createApp(opts: { host?: string } = {}) {
 
   app.route("/", todayRoutes);
   app.route("/", accountRoutes);
+  app.route("/calendar", calendarRoutes);
+  app.route("/goals", goalRoutes);
   app.route("/journal", journalRoutes);
   app.route("/tasks", taskRoutes);
   app.route("/links", linkRoutes);
